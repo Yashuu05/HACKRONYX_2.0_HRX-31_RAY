@@ -384,7 +384,7 @@ export default function MatrixExplanation() {
           </div>
 
           <p style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6', maxWidth: '720px', marginBottom: '20px' }}>
-            Cashflow Guardian uses clean statistical rules applied directly to your database records.
+            SPECIFY uses clean statistical rules applied directly to your database records.
             No black-box models or speculative AI predictions own your balances.
           </p>
 

@@ -1,7 +1,7 @@
 [project]
 name = "cashflow-guardian-2026"
 version = "0.1.0"
-description = "Cashflow Guardian- Hackronyx 2.0 Ray 2026 Hacakthon"
+description = "SPECIFY- Hackronyx 2.0 Ray 2026 Hacakthon"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

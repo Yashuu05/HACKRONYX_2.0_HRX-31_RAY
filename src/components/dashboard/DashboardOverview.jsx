@@ -500,7 +500,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
             </div>
 
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', margin: '0 0 16px 0' }}>
-              Cashflow Guardian continuously audits your bank balance and recurring debits against your configured safety buffer of ₹{formatCurrency(safetyBuffer, 0)}.
+              SPECIFY continuously audits your bank balance and recurring debits against your configured safety buffer of ₹{formatCurrency(safetyBuffer, 0)}.
             </p>
 
             <div style={{

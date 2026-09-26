@@ -1,5 +1,5 @@
 """
-AI Cashflow Guardian
+SPECIFY
 --------------------
 Natural Language Transaction Parser
 
@@ -20,7 +20,7 @@ Approach:
 
 No LLM/API is required.
 
-Author: AI Cashflow Guardian Team
+Author: SPECIFY Team
 """
 
 import re

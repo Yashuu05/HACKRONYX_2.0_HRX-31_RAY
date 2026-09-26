@@ -211,11 +211,11 @@ export default function SignUp({ onNavigateSignIn, onSignUpSuccess }) {
             justifyContent: 'center',
             marginBottom: '12px'
           }}>
-            <ShieldCheck size={28} />
+            <img src="/Logo.jpeg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
           </div>
           <h1 className="heading-md" style={{ marginBottom: '6px' }}>Create your Account</h1>
           <p className="body-sm" style={{ color: 'var(--text-secondary)' }}>
-            Start forecasting your Safe-to-Spend limit with Cashflow Guardian.
+            Start forecasting your Safe-to-Spend limit with SPECIFY.
           </p>
         </div>
 

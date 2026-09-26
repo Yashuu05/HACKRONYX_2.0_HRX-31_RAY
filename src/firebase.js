@@ -12,7 +12,7 @@ import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
 // Firebase configuration from environment or fallback demo configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCashflowGuardianDemoMockKey123",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSySPECIFYianDemoMockKey123",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "cashflow-guardian-main.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "cashflow-guardian-main",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "cashflow-guardian-main.appspot.com",

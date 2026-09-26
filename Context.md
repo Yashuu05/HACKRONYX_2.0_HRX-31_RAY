@@ -1,4 +1,4 @@
-# AI Cashflow Guardian — Project Context
+# SPECIFY — Project Context
 
 > **Hackronyx 2.0 | Final Round | R2-P4**
 >
@@ -33,7 +33,7 @@ Most finance apps mainly explain **past spending**.
 
 ## 2. Solution
 
-AI Cashflow Guardian continuously runs:
+SPECIFY continuously runs:
 
 ```text
 OBSERVE → PREDICT → EXPLAIN → INTERVENE → LEARN → RE-PLAN
@@ -458,4 +458,4 @@ And the complete flow must respond to **live judge input without hardcoded outpu
 
 ## 16. One-Line Positioning
 
-> **AI Cashflow Guardian is not an expense tracker; it is a forward-looking, explainable liquidity agent that helps users understand how much they can safely spend today while preparing for what happens next.**
+> **SPECIFY is not an expense tracker; it is a forward-looking, explainable liquidity agent that helps users understand how much they can safely spend today while preparing for what happens next.**

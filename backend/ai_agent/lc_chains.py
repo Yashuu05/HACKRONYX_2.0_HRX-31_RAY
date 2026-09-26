@@ -171,7 +171,7 @@ def create_deterministic_fallback_response(query: str, user_id: str = "usr-001")
 def build_langchain_chat_chain():
     """Builds the complete LangChain LCEL pipeline with prompt template and output parser."""
     system_template = """
-You are AI Cashflow Guardian Assistant, an elite personal financial intelligence and liquidity risk advisor.
+You are SPECIFY Assistant, an elite personal financial intelligence and liquidity risk advisor.
 Your mission is to provide concise, empathetic, and 100% mathematically accurate guidance on daily spending, liquidity forecasts, and money-saving actions.
 
 CRITICAL FINANCIAL GROUNDING RULES:

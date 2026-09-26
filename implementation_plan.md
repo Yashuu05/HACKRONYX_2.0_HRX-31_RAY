@@ -1,6 +1,6 @@
 # Implementation Plan — CSV/XLSX Engine & Firestore Ingestion
 
-> **Project:** AI Cashflow Guardian  
+> **Project:** SPECIFY  
 > **Module:** Core Dataset Ingestion Engine (Backend Only)  
 > **Target Document:** `implementation_plan.md`  
 

@@ -20,7 +20,7 @@ export default function DemoScenarioTimeline() {
             8-Step Interactive Narrative Preview
           </h2>
           <p className="body-lead">
-            The organizer requires this exact narrative arc to be demonstrable live. Click through each step below to witness how Cashflow Guardian dynamically re-plans state changes.
+            The organizer requires this exact narrative arc to be demonstrable live. Click through each step below to witness how SPECIFY dynamically re-plans state changes.
           </p>
         </div>
 

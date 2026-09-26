@@ -9,7 +9,7 @@ const API_BASE = 'http://localhost:8000';
 const INIT_MESSAGE = {
   id: 'init-1',
   sender: 'bot',
-  text: "Hello! I am your LangChain-powered AI Cashflow Guardian Assistant. I track your real-time liquidity forecasts, protected bill commitments, and Safe-to-Spend limits from Neon PostgreSQL. How can I assist you today?",
+  text: "Hello! I am your LangChain-powered SPECIFY Assistant. I track your real-time liquidity forecasts, protected bill commitments, and Safe-to-Spend limits from Neon PostgreSQL. How can I assist you today?",
   traceId: 'TR-LC-INIT',
   modelUsed: 'LangChain Agent',
   feedbackStatus: null,
@@ -277,7 +277,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <h1 className="heading-lg" style={{ fontSize: '24px', margin: 0 }}>
-                  AI Cashflow Guardian Assistant
+                  SPECIFY Assistant
                 </h1>
                 <span style={{
                   fontSize: '11px',

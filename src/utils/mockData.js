@@ -1,4 +1,4 @@
-// Initial mock dataset for AI Cashflow Guardian demo
+// Initial mock dataset for SPECIFY demo
 
 export const INITIAL_FORECAST_DATA = [
   { day: 'Oct 17', expected: 6400, best: 6400, worst: 6400, event: 'Starting Balance', type: 'neutral' },
@@ -126,7 +126,7 @@ export const FAQ_ITEMS = [
     a: "No. All numbers, forecasts, confidence intervals, and Safe-to-Spend values are calculated using 100% deterministic statistical algorithms (moving averages + scheduled commitment rules). Large Language Models are used strictly for natural-language explainability summaries, preventing any numeric hallucinations."
   },
   {
-    q: "How does Cashflow Guardian categorize Indian transaction patterns?",
+    q: "How does SPECIFY categorize Indian transaction patterns?",
     a: "The ingestion pipeline features specialized pattern matchers for Indian financial transactions, including UPI merchant strings (e.g. Swiggy, Zomato, Canteen), stipend credit narrations, family bank transfers, mess fees, and subscription debits."
   },
   {
@@ -134,7 +134,7 @@ export const FAQ_ITEMS = [
     a: "During hackathon judging, evaluators can upload custom CSV transaction files or inject ad-hoc expense/income events in real time. The core engine recomputes the forecast, Safe-to-Spend, and risk alerts live in under 1 second without hardcoded screens."
   },
   {
-    q: "Does Cashflow Guardian move real money or integrate bank credentials?",
-    a: "No. Product guardrails strictly keep Cashflow Guardian as a simulated personal cash-flow intelligence agent. It operates on uploaded CSV/JSON feeds and simulated accounts without requiring OAuth bank logins or real fund movements."
+    q: "Does SPECIFY move real money or integrate bank credentials?",
+    a: "No. Product guardrails strictly keep SPECIFY as a simulated personal cash-flow intelligence agent. It operates on uploaded CSV/JSON feeds and simulated accounts without requiring OAuth bank logins or real fund movements."
   }
 ];

@@ -22,7 +22,7 @@ export default function GuardrailsAndSecurity() {
       title: 'Zero Lending or Advisory',
       color: '#D97706',
       bgColor: '#FFFBEB',
-      description: 'Strictly bounded to liquidity protection. Cashflow Guardian is not a banking, lending, investment, or credit-scoring platform. No real funds ever move.'
+      description: 'Strictly bounded to liquidity protection. SPECIFY is not a banking, lending, investment, or credit-scoring platform. No real funds ever move.'
     }
   ];
 

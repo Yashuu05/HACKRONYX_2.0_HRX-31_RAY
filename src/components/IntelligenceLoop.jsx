@@ -74,7 +74,7 @@ export default function IntelligenceLoop() {
             The Continuous Intelligence Loop
           </h2>
           <p className="body-lead">
-            Unlike static finance apps, Cashflow Guardian continuously executes the six-stage autonomous cycle to keep your liquidity protected.
+            Unlike static finance apps, SPECIFY continuously executes the six-stage autonomous cycle to keep your liquidity protected.
           </p>
         </div>
 

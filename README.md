@@ -1,8 +1,8 @@
-# AI Cashflow Guardian
+# SPECIFY
 
 > A proactive, explainable personal cash-flow intelligence agent for students and young professionals.
 
-Cashflow Guardian answers the question traditional budgeting tools leave unanswered:
+SPECIFY answers the question traditional budgeting tools leave unanswered:
 
 > **Considering upcoming income and expenses, how much can I safely spend today?**
 
@@ -10,7 +10,7 @@ This repository contains the HackRonyx 2.0 / R2-P4 prototype. It demonstrates a 
 
 ## Product At A Glance
 
-Cashflow Guardian continuously evaluates a user's near-term liquidity rather than only reporting historical spending. It combines:
+SPECIFY continuously evaluates a user's near-term liquidity rather than only reporting historical spending. It combines:
 
 - 7-14 day balance trajectory forecasting
 - Dynamic Safe-to-Spend calculation
@@ -25,7 +25,7 @@ Cashflow Guardian continuously evaluates a user's near-term liquidity rather tha
 
 Students, interns, and young professionals often receive irregular income from salaries, stipends, freelance work, and family transfers while still carrying recurring and unexpected expenses. Most financial applications explain what has already happened; they do not protect the user's future liquidity.
 
-Cashflow Guardian projects the user's financial position over the next 7-14 days, protects essential commitments, reserves a safety buffer, explains emerging risk, and recommends a practical next action. It is a personal liquidity management tool, not a banking, lending, investment, credit-scoring, or money-movement product.
+SPECIFY projects the user's financial position over the next 7-14 days, protects essential commitments, reserves a safety buffer, explains emerging risk, and recommends a practical next action. It is a personal liquidity management tool, not a banking, lending, investment, credit-scoring, or money-movement product.
 
 ## Core Intelligence Loop
 

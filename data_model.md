@@ -1,6 +1,6 @@
-# Cashflow Guardian Data Model Documentation
+# SPECIFY Data Model Documentation
 
-This document outlines the refined relational database schema designed for **Cashflow Guardian** (stored on PostgreSQL via Neon.com).
+This document outlines the refined relational database schema designed for **SPECIFY** (stored on PostgreSQL via Neon.com).
 
 ---
 
@@ -178,7 +178,7 @@ CREATE INDEX idx_alerts_user_read ON alerts(user_id, is_read);
 ---
 
 ### 2.4 Table: `ai_chat` (Conversational Safe-to-Spend Queries)
-Stores conversations between the user and the AI Cashflow Guardian assistant.
+Stores conversations between the user and the SPECIFY assistant.
 
 | Column Name | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |

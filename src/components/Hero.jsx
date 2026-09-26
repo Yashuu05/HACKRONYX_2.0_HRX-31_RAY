@@ -56,7 +56,7 @@ export default function Hero({ onExploreClick }) {
 
             <p className="body-lead" style={{ marginBottom: '32px' }}>
               Traditional finance apps look backward at what you already spent. 
-              <strong> Cashflow Guardian</strong> continuously forecasts your next 7 to 14 days, protects essential commitments like rent and mess fees, and alerts you to shortfalls before they happen.
+              <strong> SPECIFY</strong> continuously forecasts your next 7 to 14 days, protects essential commitments like rent and mess fees, and alerts you to shortfalls before they happen.
             </p>
 
             <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '40px' }}>

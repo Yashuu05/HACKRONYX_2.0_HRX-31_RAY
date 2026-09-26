@@ -1,5 +1,5 @@
 """
-Shortfall Detection Package for Cashflow Guardian.
+Shortfall Detection Package for SPECIFY.
 Provides mathematical trajectory computation, algorithmic root-cause analysis,
 and rule-based mitigation strategy generation.
 """

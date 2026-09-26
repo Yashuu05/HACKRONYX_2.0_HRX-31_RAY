@@ -56,12 +56,12 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
           }}>
-            <ShieldCheck size={20} color="#FFFFFF" strokeWidth={2.4} />
+            <img src="/Logo.jpeg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
           </div>
           {!collapsed && (
             <div style={{ overflow: 'hidden' }}>
               <div style={{ fontSize: '15px', fontWeight: '800', color: '#0F172A', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
-                Cashflow Guardian
+                SPECIFY
               </div>
               <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 Dashboard

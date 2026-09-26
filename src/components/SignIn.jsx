@@ -171,11 +171,11 @@ export default function SignIn({ onNavigateSignUp, onLoginSuccess }) {
             justifyContent: 'center',
             marginBottom: '12px'
           }}>
-            <ShieldCheck size={28} />
+            <img src="/Logo.jpeg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
           </div>
           <h1 className="heading-md" style={{ marginBottom: '6px' }}>Welcome back</h1>
           <p className="body-sm" style={{ color: 'var(--text-secondary)' }}>
-            Sign in to access your personal cashflow guardian dashboard.
+            Sign in to access your personal SPECIFY dashboard.
           </p>
         </div>
 

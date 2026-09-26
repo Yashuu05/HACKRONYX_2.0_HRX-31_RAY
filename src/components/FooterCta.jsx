@@ -29,7 +29,7 @@ export default function FooterCta({ onLaunchDashboard }) {
           </p>
 
           <button onClick={onLaunchDashboard} className="btn btn-emerald" style={{ padding: '16px 32px', fontSize: '16px' }}>
-            <span>Launch AI Cashflow Guardian</span>
+            <span>Launch SPECIFY</span>
             <ArrowRight size={18} />
           </button>
         </div>
@@ -56,10 +56,10 @@ export default function FooterCta({ onLaunchDashboard }) {
               justifyContent: 'center',
               color: '#FFFFFF'
             }}>
-              <ShieldCheck size={20} />
+              <img src="/Logo.jpeg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
             </div>
             <div>
-              <div style={{ fontWeight: '700', fontSize: '15px', color: '#FFFFFF' }}>AI Cashflow Guardian</div>
+              <div style={{ fontWeight: '700', fontSize: '15px', color: '#FFFFFF' }}>SPECIFY</div>
               <div style={{ fontSize: '12px', color: '#64748B' }}>Hackronyx 2.0 — Problem Statement R2-P4</div>
             </div>
           </div>

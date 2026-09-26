@@ -48,11 +48,11 @@ export default function Navbar({ onNavigateHome, onNavigateSignIn, onNavigateSig
             color: 'var(--brand-blue)',
             boxShadow: 'var(--shadow-sm)'
           }}>
-            <ShieldCheck size={22} strokeWidth={2.4} />
+            <img src="/Logo.jpeg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>
-              Cashflow Guardian
+              SPECIFY
             </span>
             <span className="badge badge-blue" style={{ padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>
               R2-P4

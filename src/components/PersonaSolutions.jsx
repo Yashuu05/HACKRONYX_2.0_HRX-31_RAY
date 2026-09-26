@@ -15,7 +15,7 @@ export default function PersonaSolutions() {
             Engineered for Students & Young Professionals
           </h2>
           <p className="body-lead">
-            Traditional banking apps treat everyone like salaried corporate employees. Cashflow Guardian is tailored specifically to irregular cash-flow realities.
+            Traditional banking apps treat everyone like salaried corporate employees. SPECIFY is tailored specifically to irregular cash-flow realities.
           </p>
         </div>
 

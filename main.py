@@ -6,7 +6,7 @@ from typing import Dict, Optional, List, Any
 import uuid
 
 app = FastAPI(
-    title="AI Cashflow Guardian API",
+    title="SPECIFY API",
     description="Backend API for personal liquidity forecasting & user authentication",
     version="1.0.0"
 )
@@ -55,7 +55,7 @@ class AuthResponse(BaseModel):
 @app.get("/")
 def read_root():
     return {
-        "service": "AI Cashflow Guardian Backend",
+        "service": "SPECIFY Backend",
         "status": "online",
         "registered_users_count": len(MOCK_USERS_DB)
     }
@@ -1274,4 +1274,4 @@ async def upload_csv_transactions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process and ingest dataset: {str(e)}"
-        )
+        )

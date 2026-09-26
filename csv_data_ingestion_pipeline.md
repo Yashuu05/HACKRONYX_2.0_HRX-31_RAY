@@ -1,6 +1,6 @@
 # CSV & Dataset Ingestion Pipeline — System Design & Logical Workflow
 
-> **Project:** AI Cashflow Guardian  
+> **Project:** SPECIFY  
 > **Module:** Data Ingestion & Normalization Engine  
 > **Document Status:** Architectural Specification & Detailed Workflow  
 > **Output Target:** `csv_data_ingestion_pipeline.md`
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary & Component Overview
 
-The **CSV & Dataset Ingestion Pipeline** forms the entry point of the **AI Cashflow Guardian** intelligence loop. In accordance with Section 6.1 (*High-Level Component View*) of the System Architecture, the ingestion pipeline transforms raw, heterogeneous bank statements, UPI export files, and `.csv`/`.xlsx` account feeds into normalized, cleaned, and auditable transaction records.
+The **CSV & Dataset Ingestion Pipeline** forms the entry point of the **SPECIFY** intelligence loop. In accordance with Section 6.1 (*High-Level Component View*) of the System Architecture, the ingestion pipeline transforms raw, heterogeneous bank statements, UPI export files, and `.csv`/`.xlsx` account feeds into normalized, cleaned, and auditable transaction records.
 
 Once ingested, the pipeline automatically triggers downstream intelligence modules:
 1. **Data Cleaning & Deduplication**

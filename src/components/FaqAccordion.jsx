@@ -22,7 +22,7 @@ export default function FaqAccordion() {
             Technical & Architecture Details
           </h2>
           <p className="body-lead">
-            Everything you need to know about how Cashflow Guardian processes data and evaluates liquidity.
+            Everything you need to know about how SPECIFY processes data and evaluates liquidity.
           </p>
         </div>
 
