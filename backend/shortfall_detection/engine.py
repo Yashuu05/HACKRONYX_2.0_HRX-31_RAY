@@ -44,7 +44,7 @@ def calculate_shortfall_trajectory(
         # 2. Compute Net Balance from 'transactions' table (total_income - total_spendings)
         cur.execute(
             """
-            SELECT activity_type, COALESCE(SUM(amount), 0) AS total
+            SELECT activity_type, COALESCE(SUM(amount), 0) AS total, COUNT(*) as cnt
             FROM transactions
             WHERE user_id = %s
             GROUP BY activity_type;
@@ -55,15 +55,40 @@ def calculate_shortfall_trajectory(
 
         total_income = 0.0
         total_expense = 0.0
+        total_tx_count = 0
         for r in summary_rows:
             act = (r['activity_type'] or '').lower().strip()
             tot = float(r['total'] or 0.0)
+            cnt = int(r.get('cnt') or 0)
+            total_tx_count += cnt
             if act == 'income':
                 total_income += tot
             elif act == 'expense':
                 total_expense += tot
 
         current_balance = round(total_income - total_expense, 2)
+
+        has_enough_data = total_tx_count > 0
+
+        # If zero transactions in DB, user has no data to forecast
+        if not has_enough_data:
+            return {
+                "user_id": user_id,
+                "horizon_days": horizon_days,
+                "has_enough_data": False,
+                "current_balance": 0.0,
+                "safety_buffer": safety_buffer,
+                "weekly_budget": budget_week,
+                "monthly_budget": budget_month,
+                "daily_burn_rate": 0.0,
+                "is_shortfall_predicted": False,
+                "risk_score": 0.0,
+                "risk_level": "SAFE",
+                "days_until_shortfall": None,
+                "shortfall_date": None,
+                "max_shortfall_deficit": 0.0,
+                "trajectory": []
+            }
 
         # 3. Fetch future scheduled / protected transactions within horizon
         today = datetime.date.today()

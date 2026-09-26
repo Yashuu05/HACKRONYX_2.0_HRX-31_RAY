@@ -8,24 +8,21 @@ import {
   Sliders,
   AlertTriangle,
   CheckCircle2,
-  ThumbsUp,
-  ThumbsDown,
-  ArrowRight,
   PlusCircle,
-  FileText,
   Clock,
   RefreshCw,
-  Database
+  Database,
+  Sparkles
 } from 'lucide-react';
 import ShortfallRiskCard from './ShortfallRiskCard';
 
-export default function DashboardOverview({ transactions, forecastData, onOpenAddModal, onNavigateToChat }) {
+export default function DashboardOverview({ transactions, onOpenAddModal, onNavigateToChat }) {
   const [horizonDays, setHorizonDays] = useState(14);
   const [hoveredPoint, setHoveredPoint] = useState(null);
-  const [recommendationStatus, setRecommendationStatus] = useState(null); // 'accepted' | 'rejected' | 'modified'
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
   const [recentError, setRecentError] = useState(null);
+  const [shortfallTrajectory, setShortfallTrajectory] = useState([]);
 
   // User Constants State (constants table in Neon DB)
   const [userConstants, setUserConstants] = useState({
@@ -55,6 +52,7 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
     } catch (err) {
       console.warn('Neon DB recent transactions fetch fallback:', err);
       setRecentError(err.message);
+      setRecentTransactions([]);
     } finally {
       setLoadingRecent(false);
     }
@@ -75,7 +73,7 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
     }
   };
 
-  // Fetch real-time summary calculations (net balance, total income, total spendings) from Neon PostgreSQL
+  // Fetch real-time summary calculations from Neon PostgreSQL
   const fetchSummaryData = async () => {
     try {
       const response = await fetch('http://localhost:8000/api/transactions/summary?user_id=usr-001');
@@ -90,35 +88,39 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
     }
   };
 
+  // Fetch shortfall analysis trajectory from Neon DB
+  const fetchShortfallTrajectory = async () => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/shortfall/analysis?user_id=usr-001&horizon_days=${horizonDays}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'success' && data.analysis) {
+          setShortfallTrajectory(data.analysis.trajectory || []);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch shortfall trajectory:', err);
+    }
+  };
+
   useEffect(() => {
     fetchRecentTransactions();
     fetchUserConstants();
     fetchSummaryData();
-  }, [transactions]);
+    fetchShortfallTrajectory();
+  }, [transactions, horizonDays]);
 
-  // Fallback to local props if DB fetch hasn't returned records or is offline
-  const safeTransactions = Array.isArray(transactions) ? transactions : [];
-  const displayRecent = (Array.isArray(recentTransactions) && recentTransactions.length > 0)
-    ? recentTransactions
-    : safeTransactions.slice(0, 5).map(t => ({
-        id: t.id,
-        description: t.description,
-        category: t.category,
-        type: t.type,
-        amount: t.amount,
-        date: t.date,
-        time: t.time
-      }));
+  // displayRecent strictly uses recentTransactions from Neon DB (no mock fallback)
+  const displayRecent = Array.isArray(recentTransactions) ? recentTransactions : [];
 
-  // Calculate fallback totals from local props if DB summary endpoint is offline
-  const localTotalIncome = safeTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-  const localTotalSpendings = safeTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+  // Determine if there is enough data in Neon DB to calculate a forecast
+  const totalIncome = summaryData !== null && summaryData !== undefined ? Number(summaryData.total_income || 0) : 0;
+  const totalSpendings = summaryData !== null && summaryData !== undefined ? Number(summaryData.total_spendings || 0) : 0;
+  const currentBankBalance = summaryData !== null && summaryData !== undefined ? Number(summaryData.net_balance || 0) : 0;
 
-  // Metrics dynamically fetched / calculated from Neon PostgreSQL SQL Aggregation
-  const totalIncome = summaryData !== null && summaryData !== undefined ? Number(summaryData.total_income || 0) : localTotalIncome;
-  const totalSpendings = summaryData !== null && summaryData !== undefined ? Number(summaryData.total_spendings || 0) : localTotalSpendings;
-  const currentBankBalance = summaryData !== null && summaryData !== undefined ? Number(summaryData.net_balance || 0) : (localTotalIncome - localTotalSpendings);
-  
+  // Has enough data check
+  const hasEnoughData = (displayRecent.length > 0) || (totalIncome > 0) || (totalSpendings > 0) || (Array.isArray(transactions) && transactions.length > 0);
+
   const protectedCommitments = 1200; // Rent + Mess
   const safetyBuffer = Number(userConstants?.safety_buffer) || 3000;
   const budgetWeek = Number(userConstants?.budget_week) || 5000;
@@ -132,18 +134,33 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
     return isNaN(num) ? '0.00' : num.toLocaleString('en-IN', { minimumFractionDigits: minDecimals });
   };
 
-  const safeForecastData = Array.isArray(forecastData) ? forecastData : [];
-  const displayedData = horizonDays === 7 ? safeForecastData.slice(0, 7) : safeForecastData;
+  // Generate real forecast chart points from shortfallTrajectory or real balance
+  const displayedData = Array.isArray(shortfallTrajectory) && shortfallTrajectory.length > 0
+    ? shortfallTrajectory.slice(0, horizonDays).map((t) => ({
+        day: `Day ${t.day}`,
+        date: t.date,
+        expected: t.projected_balance,
+        best: roundNum(t.projected_balance * 1.04),
+        worst: roundNum(t.projected_balance * 0.96),
+        event: t.is_shortfall ? `Buffer Deficit: ₹${t.shortfall_deficit}` : 'Balanced Spend'
+      }))
+    : [];
+
+  function roundNum(n) {
+    return Math.round(n * 100) / 100;
+  }
 
   // SVG Chart math
   const width = 680;
   const height = 220;
   const padding = 28;
-  const maxVal = 12000;
-  const minVal = 2000;
+
+  const vals = displayedData.map(d => d.expected);
+  const maxVal = displayedData.length > 0 ? Math.max(...vals, 10000) : 12000;
+  const minVal = displayedData.length > 0 ? Math.min(...vals, 0) : 0;
 
   const getX = (i) => padding + (i * (width - 2 * padding)) / Math.max(1, displayedData.length - 1);
-  const getY = (val) => height - padding - (((Number(val) || 0) - minVal) / (maxVal - minVal)) * (height - 2 * padding);
+  const getY = (val) => height - padding - (((Number(val) || 0) - minVal) / Math.max(1, maxVal - minVal)) * (height - 2 * padding);
 
   const expectedPoints = displayedData.map((d, i) => `${getX(i)},${getY(d.expected)}`).join(' L ');
   const bestPoints = displayedData.map((d, i) => `${getX(i)},${getY(d.best)}`);
@@ -162,7 +179,7 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
             Liquidity Guardian Overview
           </h1>
           <p className="body-sm" style={{ color: 'var(--text-secondary)' }}>
-            Real-time liquidity forecasting & Safe-to-Spend intelligence for Riya Sharma.
+            Real-time liquidity forecasting & Safe-to-Spend intelligence from Neon DB.
           </p>
         </div>
         <button onClick={onOpenAddModal} className="btn btn-primary" style={{ padding: '10px 20px' }}>
@@ -177,7 +194,7 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
         gridTemplateColumns: 'repeat(6, 1fr)',
         gap: '16px'
       }}>
-        {/* Metric 1: Net Bank Balance (total_income - total_expense) */}
+        {/* Metric 1: Net Bank Balance */}
         <div className="card" style={{ backgroundColor: '#FFFFFF', padding: '18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--brand-blue)', marginBottom: '8px' }}>
             <Wallet size={18} />
@@ -254,7 +271,7 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
           </div>
         </div>
 
-        {/* Metric 6: Safety Buffer (Configured via Neon DB Constants) */}
+        {/* Metric 6: Safety Buffer */}
         <div className="card" style={{ backgroundColor: '#FFFFFF', padding: '18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--caution-amber)', marginBottom: '8px' }}>
             <Sliders size={18} />
@@ -292,7 +309,7 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
       {/* Shortfall Risk Detection & Prevention Card */}
       <ShortfallRiskCard onNavigateToChat={onNavigateToChat} />
 
-      {/* Main Grid: Forecast Chart (Left) + Active Alerts & Recommendations (Right) */}
+      {/* Main Grid: Forecast Chart (Left) + AI Guardian Account Protection Status (Right) */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '1.6fr 1fr',
@@ -306,193 +323,193 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
                 7–14 Day Liquidity Forecast
               </h3>
               <p className="body-sm" style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
-                Deterministic cash trajectory with best, expected, and worst-case confidence bounds.
+                Deterministic cash trajectory calculated from Neon DB transactions & safety rules.
               </p>
             </div>
 
-            <div style={{ display: 'flex', backgroundColor: 'var(--bg-subtle)', borderRadius: '8px', padding: '3px' }}>
-              <button
-                onClick={() => setHorizonDays(7)}
-                style={{
-                  padding: '4px 12px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: horizonDays === 7 ? '#FFFFFF' : 'transparent',
-                  color: horizonDays === 7 ? 'var(--brand-blue)' : 'var(--text-secondary)',
-                  boxShadow: horizonDays === 7 ? 'var(--shadow-sm)' : 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                7 Days
-              </button>
-              <button
-                onClick={() => setHorizonDays(14)}
-                style={{
-                  padding: '4px 12px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: horizonDays === 14 ? '#FFFFFF' : 'transparent',
-                  color: horizonDays === 14 ? 'var(--brand-blue)' : 'var(--text-secondary)',
-                  boxShadow: horizonDays === 14 ? 'var(--shadow-sm)' : 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                14 Days
-              </button>
-            </div>
-          </div>
-
-          {/* SVG Line Chart */}
-          <div style={{ position: 'relative', width: '100%', height: `${height}px`, backgroundColor: '#FAFAFA', borderRadius: '14px', border: '1px solid var(--border-color)' }}>
-            <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-              {/* Grid Lines */}
-              <line x1="0" y1={getY(8000)} x2={width} y2={getY(8000)} stroke="#E2E8F0" strokeDasharray="3 3" />
-              <line x1="0" y1={getY(5000)} x2={width} y2={getY(5000)} stroke="#E2E8F0" strokeDasharray="3 3" />
-              
-              {/* Buffer Threshold */}
-              <line x1="0" y1={getY(4000)} x2={width} y2={getY(4000)} stroke="#FDE68A" strokeWidth="2" strokeDasharray="4 4" />
-
-              {/* Confidence Polygon */}
-              <path d={confidenceBandPath} fill="#EFF6FF" opacity="0.6" />
-
-              {/* Expected Line */}
-              <path d={`M ${expectedPoints}`} fill="none" stroke="#2563EB" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-
-              {/* Data Points */}
-              {displayedData.map((d, i) => (
-                <g key={i}>
-                  <circle
-                    cx={getX(i)}
-                    cy={getY(d.expected)}
-                    r={hoveredPoint === i ? 6 : 4}
-                    fill={d.type === 'essential' ? '#D97706' : d.type === 'income' ? '#059669' : '#2563EB'}
-                    stroke="#FFFFFF"
-                    strokeWidth="2"
-                    onMouseEnter={() => setHoveredPoint(i)}
-                    onMouseLeave={() => setHoveredPoint(null)}
-                    style={{ cursor: 'pointer', transition: 'all 0.15s ease' }}
-                  />
-                </g>
-              ))}
-            </svg>
-
-            {/* Hover Tooltip */}
-            {hoveredPoint !== null && (
-              <div style={{
-                position: 'absolute',
-                top: '12px',
-                left: `${Math.min(Math.max(getX(hoveredPoint) - 80, 10), width - 160)}px`,
-                backgroundColor: 'var(--text-primary)',
-                color: '#FFFFFF',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                boxShadow: 'var(--shadow-lg)',
-                pointerEvents: 'none',
-                zIndex: 10
-              }}>
-                <div style={{ fontWeight: '700' }}>{displayedData[hoveredPoint].day}</div>
-                <div>{displayedData[hoveredPoint].event}</div>
-                <div style={{ color: '#93C5FD', fontWeight: '600', marginTop: '2px' }}>
-                  Expected: ₹{displayedData[hoveredPoint].expected.toLocaleString()}
-                </div>
+            {hasEnoughData && (
+              <div style={{ display: 'flex', backgroundColor: 'var(--bg-subtle)', borderRadius: '8px', padding: '3px' }}>
+                <button
+                  onClick={() => setHorizonDays(7)}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '6px',
+                    border: 'none',
+                    backgroundColor: horizonDays === 7 ? '#FFFFFF' : 'transparent',
+                    color: horizonDays === 7 ? 'var(--brand-blue)' : 'var(--text-secondary)',
+                    boxShadow: horizonDays === 7 ? 'var(--shadow-sm)' : 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  7 Days
+                </button>
+                <button
+                  onClick={() => setHorizonDays(14)}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '6px',
+                    border: 'none',
+                    backgroundColor: horizonDays === 14 ? '#FFFFFF' : 'transparent',
+                    color: horizonDays === 14 ? 'var(--brand-blue)' : 'var(--text-secondary)',
+                    boxShadow: horizonDays === 14 ? 'var(--shadow-sm)' : 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  14 Days
+                </button>
               </div>
             )}
           </div>
-        </div>
 
-        {/* Right Card: Active Risk Alert & Recommendation Engine */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Risk Alert Box */}
-          <div style={{
-            backgroundColor: 'var(--caution-amber-light)',
-            border: '1px solid var(--caution-amber-border)',
-            borderRadius: '16px',
-            padding: '20px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              <div style={{
-                backgroundColor: '#FFFFFF',
-                color: 'var(--caution-amber)',
-                padding: '6px',
-                borderRadius: '8px',
-                display: 'flex'
-              }}>
-                <AlertTriangle size={18} />
-              </div>
-              <h4 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>
-                Early Shortfall Warning
-              </h4>
-            </div>
-
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', margin: '0 0 12px 0' }}>
-              <strong>Trace Reason:</strong> Delayed freelance stipend expected on Oct 25 + Mess Fee debit on Oct 24 may breach safety buffer by ₹350.
-            </p>
-
-            {/* Recommendation Feedback Control Box */}
+          {/* If no data available, render "No enough data to forecast" notice */}
+          {!hasEnoughData ? (
             <div style={{
-              backgroundColor: '#FFFFFF',
-              borderRadius: '12px',
-              padding: '14px',
+              padding: '48px 24px',
+              textAlign: 'center',
+              backgroundColor: '#FAFAFA',
+              borderRadius: '14px',
               border: '1px solid var(--border-color)'
             }}>
-              <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--brand-blue)', marginBottom: '4px' }}>
-                System Recommended Action
+              <TrendingUp size={36} style={{ margin: '0 auto 12px auto', display: 'block', color: 'var(--text-muted)', opacity: 0.4 }} />
+              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
+                No enough data to forecast
               </div>
-              <p style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 12px 0' }}>
-                "Apply ₹150/day spend limit for 4 days to absorb buffer deficit."
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '420px', margin: '0 auto 18px auto', lineHeight: '1.5' }}>
+                Add your first income or expense transaction to unlock real-time 7–14 day liquidity forecasting and Safe-to-Spend calculations from Neon DB.
               </p>
+              <button onClick={onOpenAddModal} className="btn btn-primary btn-sm">
+                + Add Transaction
+              </button>
+            </div>
+          ) : (
+            /* SVG Line Chart using real Neon DB trajectory */
+            <div style={{ position: 'relative', width: '100%', height: `${height}px`, backgroundColor: '#FAFAFA', borderRadius: '14px', border: '1px solid var(--border-color)' }}>
+              <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                {/* Grid Lines */}
+                <line x1="0" y1={getY(8000)} x2={width} y2={getY(8000)} stroke="#E2E8F0" strokeDasharray="3 3" />
+                <line x1="0" y1={getY(5000)} x2={width} y2={getY(5000)} stroke="#E2E8F0" strokeDasharray="3 3" />
+                
+                {/* Buffer Threshold */}
+                <line x1="0" y1={getY(safetyBuffer)} x2={width} y2={getY(safetyBuffer)} stroke="#FDE68A" strokeWidth="2" strokeDasharray="4 4" />
 
-              {recommendationStatus ? (
+                {/* Confidence Polygon */}
+                {confidenceBandPath && <path d={confidenceBandPath} fill="#EFF6FF" opacity="0.6" />}
+
+                {/* Expected Line */}
+                {expectedPoints && <path d={`M ${expectedPoints}`} fill="none" stroke="#2563EB" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+
+                {/* Data Points */}
+                {displayedData.map((d, i) => (
+                  <g key={i}>
+                    <circle
+                      cx={getX(i)}
+                      cy={getY(d.expected)}
+                      r={hoveredPoint === i ? 6 : 4}
+                      fill="#2563EB"
+                      stroke="#FFFFFF"
+                      strokeWidth="2"
+                      onMouseEnter={() => setHoveredPoint(i)}
+                      onMouseLeave={() => setHoveredPoint(null)}
+                      style={{ cursor: 'pointer', transition: 'all 0.15s ease' }}
+                    />
+                  </g>
+                ))}
+              </svg>
+
+              {/* Hover Tooltip */}
+              {hoveredPoint !== null && displayedData[hoveredPoint] && (
                 <div style={{
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  color: recommendationStatus === 'accepted' ? 'var(--safe-green)' : 'var(--caution-amber)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute',
+                  top: '12px',
+                  left: `${Math.min(Math.max(getX(hoveredPoint) - 80, 10), width - 160)}px`,
+                  backgroundColor: 'var(--text-primary)',
+                  color: '#FFFFFF',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  boxShadow: 'var(--shadow-lg)',
+                  pointerEvents: 'none',
+                  zIndex: 10
                 }}>
-                  <CheckCircle2 size={16} />
-                  <span>Feedback recorded: {recommendationStatus.toUpperCase()} (Weight updated)</span>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => setRecommendationStatus('accepted')}
-                    className="btn btn-sm"
-                    style={{ backgroundColor: 'var(--safe-green-light)', borderColor: 'var(--safe-green-border)', color: 'var(--safe-green)', fontSize: '12px', flex: 1 }}
-                  >
-                    <ThumbsUp size={14} />
-                    <span>Accept</span>
-                  </button>
-
-                  <button
-                    onClick={() => setRecommendationStatus('rejected')}
-                    className="btn btn-sm"
-                    style={{ backgroundColor: '#FFFFFF', borderColor: 'var(--border-color)', color: 'var(--text-secondary)', fontSize: '12px', flex: 1 }}
-                  >
-                    <ThumbsDown size={14} />
-                    <span>Reject</span>
-                  </button>
+                  <div style={{ fontWeight: '700' }}>{displayedData[hoveredPoint].day} ({displayedData[hoveredPoint].date})</div>
+                  <div>{displayedData[hoveredPoint].event}</div>
+                  <div style={{ color: '#93C5FD', fontWeight: '600', marginTop: '2px' }}>
+                    Projected: ₹{displayedData[hoveredPoint].expected.toLocaleString()}
+                  </div>
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* Right Card: AI Guardian Protection Status */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            border: '1px solid var(--border-color)',
+            borderRadius: '16px',
+            padding: '20px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <div style={{
+                backgroundColor: 'var(--safe-green-light)',
+                color: 'var(--safe-green)',
+                padding: '8px',
+                borderRadius: '10px',
+                display: 'flex'
+              }}>
+                <ShieldCheck size={20} />
+              </div>
+              <div>
+                <h4 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>
+                  AI Protection Status
+                </h4>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Real-time Safety Buffer Monitoring</div>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', margin: '0 0 16px 0' }}>
+              Cashflow Guardian continuously audits your bank balance and recurring debits against your configured safety buffer of ₹{formatCurrency(safetyBuffer, 0)}.
+            </p>
+
+            <div style={{
+              backgroundColor: 'var(--bg-canvas)',
+              borderRadius: '12px',
+              padding: '14px',
+              border: '1px solid var(--border-color)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Protected Bills Reserve:</span>
+                <strong style={{ color: 'var(--text-primary)' }}>₹ 1,200.00</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Minimum Emergency Buffer:</span>
+                <strong style={{ color: 'var(--brand-blue)' }}>₹ {formatCurrency(safetyBuffer, 0)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>Safe-to-Spend Cap:</span>
+                <strong style={{ color: 'var(--safe-green)', fontWeight: '800' }}>₹ {formatCurrency(safeToSpend)}</strong>
+              </div>
+            </div>
           </div>
 
-          {/* Account Health Quick Status */}
+          {/* Account Sync Status */}
           <div className="card" style={{ backgroundColor: '#FFFFFF', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Clock size={18} color="var(--brand-blue)" />
               <div>
-                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>Last Sync</div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Just now (Live engine)</div>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>Neon DB Sync</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Connected to PostgreSQL</div>
               </div>
             </div>
-            <span className="badge badge-green">100% Deterministic</span>
+            <span className="badge badge-green">100% Live</span>
           </div>
         </div>
       </div>
@@ -533,8 +550,8 @@ export default function DashboardOverview({ transactions, forecastData, onOpenAd
             Fetching recent account activity from Neon PostgreSQL...
           </div>
         ) : displayRecent.length === 0 ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-            No recent account transactions found.
+          <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '14px', fontWeight: '600' }}>
+            No recent transactions
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

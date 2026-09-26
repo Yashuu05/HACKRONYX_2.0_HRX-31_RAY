@@ -171,155 +171,158 @@ export default function ShortfallRiskCard({ onApplyClamp, onRefresh, onNavigateT
         <div>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>DAILY BURN BASELINE</div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-primary)' }}>
-            ₹ {formatCurrency(analysis.daily_burn_rate, 714.29)} <span style={{ fontSize: '11px', fontWeight: '500' }}>/day</span>
+            ₹ {formatCurrency((analysis.has_enough_data === false && !simulatedShortfall) ? 0 : (analysis.daily_burn_rate ?? (simulatedShortfall ? 714.29 : 0)), 0)} <span style={{ fontSize: '11px', fontWeight: '500' }}>/day</span>
           </div>
         </div>
       </div>
 
-      {/* Algorithmic & LLM Root Cause Reasoning */}
-      <div style={{ marginBottom: '18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Zap size={14} color="var(--brand-blue)" />
-            <span>Shortfall Reasoning & AI Root Cause Analysis</span>
-          </div>
-          <span style={{
-            fontSize: '11px',
-            padding: '2px 8px',
-            borderRadius: '10px',
-            backgroundColor: '#EEF2FF',
-            color: 'var(--brand-blue)',
-            fontWeight: '700',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px'
-          }}>
-            <Sparkles size={11} />
-            {reasoning.llm_output?.ai_model_used || 'Gemini 3.5 Flash (google)'}
-          </span>
-        </div>
-        <div style={{
-          backgroundColor: isCritical ? '#FFF5F5' : (isSafe ? '#F0FDF4' : '#FFFDF0'),
-          padding: '14px 16px',
-          borderRadius: '12px',
-          fontSize: '13px',
-          color: 'var(--text-primary)',
-          lineHeight: '1.5',
-          borderLeft: `4px solid ${isCritical ? '#DC2626' : (isSafe ? 'var(--safe-green)' : '#D97706')}`
-        }}>
-          {isSafe && !simulatedShortfall ? (
-            <div>Your balance trajectory indicates no shortfall risk within the 14-day window. Spending is within your weekly budget allocation.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ fontWeight: '700', color: isCritical ? '#991B1B' : '#92400E' }}>
-                {reasoning.summary_reason || 'Liquidity deficit detected within forecast horizon.'}
+      {/* Algorithmic & LLM Root Cause Reasoning (Only expand when shortfall is detected or simulation button clicked) */}
+      {(simulatedShortfall || analysis.is_shortfall_predicted) && (
+        <>
+          <div style={{ marginBottom: '18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Zap size={14} color="var(--brand-blue)" />
+                <span>Shortfall Reasoning & AI Root Cause Analysis</span>
               </div>
-              {Array.isArray(activeReasons) && activeReasons.map((factor, i) => (
-                <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isCritical ? '#DC2626' : '#D97706' }}></span>
-                  <span>{factor}</span>
+              <span style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                backgroundColor: '#EEF2FF',
+                color: 'var(--brand-blue)',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                <Sparkles size={11} />
+                {reasoning.llm_output?.ai_model_used || 'Gemini 3.5 Flash (google)'}
+              </span>
+            </div>
+            <div style={{
+              backgroundColor: isCritical ? '#FFF5F5' : '#FFFDF0',
+              padding: '14px 16px',
+              borderRadius: '12px',
+              fontSize: '13px',
+              color: 'var(--text-primary)',
+              lineHeight: '1.5',
+              borderLeft: `4px solid ${isCritical ? '#DC2626' : '#D97706'}`
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontWeight: '700', color: isCritical ? '#991B1B' : '#92400E' }}>
+                  {simulatedShortfall
+                    ? 'Shortfall of ₹1,850.00 predicted on Day 4. Balance trajectory will breach Safety Buffer.'
+                    : (reasoning.summary_reason || 'Liquidity deficit detected within forecast horizon.')}
                 </div>
-              ))}
+                {Array.isArray(activeReasons) && activeReasons.map((factor, i) => (
+                  <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isCritical ? '#DC2626' : '#D97706' }}></span>
+                    <span>{factor}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* Mitigation Strategies & AI Chat Action Bar */}
-      {Array.isArray(activeStrategies) && activeStrategies.length > 0 && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
-              Recommended Prevention & Mitigation Actions:
-            </div>
-            {onNavigateToChat && (
-              <button
-                onClick={() => onNavigateToChat(reasoning.summary_reason || "How can I adjust my spending to prevent the predicted shortfall?")}
-                className="btn btn-sm"
-                style={{
-                  backgroundColor: '#EEF2FF',
-                  color: 'var(--brand-blue)',
-                  border: '1px solid #C7D2FE',
-                  fontWeight: '700',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Sparkles size={13} />
-                <span>Discuss & Resolve with AI Guardian →</span>
-              </button>
-            )}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            {activeStrategies.map((strat, idx) => (
-              <div
-                key={strat.id || idx}
-                style={{
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '14px',
-                  padding: '14px',
-                  backgroundColor: '#FFFFFF',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between'
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--brand-blue)', textTransform: 'uppercase' }}>
-                      {strat.category}
-                    </span>
-                    <span className="badge badge-green" style={{ fontSize: '10px' }}>
-                      {strat.impact_label}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
-                    {strat.title}
-                  </div>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px 0', lineHeight: '1.4' }}>
-                    {strat.description}
-                  </p>
-                </div>
 
-                {strat.recommended_daily_limit && onApplyClamp && (
+          {/* Mitigation Strategies & AI Chat Action Bar */}
+          {Array.isArray(activeStrategies) && activeStrategies.length > 0 && (
+            <div style={{ marginBottom: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
+                  Recommended Prevention & Mitigation Actions:
+                </div>
+                {onNavigateToChat && (
                   <button
-                    onClick={() => onApplyClamp(strat.recommended_daily_limit)}
-                    className="btn btn-primary btn-sm"
-                    style={{ width: '100%', justifyContent: 'center' }}
+                    onClick={() => onNavigateToChat(reasoning.summary_reason || "How can I adjust my spending to prevent the predicted shortfall?")}
+                    className="btn btn-sm"
+                    style={{
+                      backgroundColor: '#EEF2FF',
+                      color: 'var(--brand-blue)',
+                      border: '1px solid #C7D2FE',
+                      fontWeight: '700',
+                      fontSize: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
                   >
-                    <span>Apply Safe-to-Spend Cap</span>
-                    <ArrowRight size={14} />
+                    <Sparkles size={13} />
+                    <span>Discuss & Resolve with AI Guardian →</span>
                   </button>
                 )}
               </div>
-            ))}
-          </div>
-        </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                {activeStrategies.map((strat, idx) => (
+                  <div
+                    key={strat.id || idx}
+                    style={{
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '14px',
+                      padding: '14px',
+                      backgroundColor: '#FFFFFF',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--brand-blue)', textTransform: 'uppercase' }}>
+                          {strat.category}
+                        </span>
+                        <span className="badge badge-green" style={{ fontSize: '10px' }}>
+                          {strat.impact_label}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                        {strat.title}
+                      </div>
+                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px 0', lineHeight: '1.4' }}>
+                        {strat.description}
+                      </p>
+                    </div>
+
+                    {strat.recommended_daily_limit && onApplyClamp && (
+                      <button
+                        onClick={() => onApplyClamp(strat.recommended_daily_limit)}
+                        className="btn btn-primary btn-sm"
+                        style={{ width: '100%', justifyContent: 'center' }}
+                      >
+                        <span>Apply Safe-to-Spend Cap</span>
+                        <ArrowRight size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Simulation Toggle Bar for Reviewers */}
       <div style={{
-        marginTop: '16px',
+        marginTop: '12px',
         paddingTop: '12px',
         borderTop: '1px dashed var(--border-color)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        fontSize: '11px',
+        fontSize: '12px',
         color: 'var(--text-muted)'
       }}>
         <span>Interactive Demo Control:</span>
         <button
           onClick={() => setSimulatedShortfall(!simulatedShortfall)}
+          className="btn btn-sm"
           style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--brand-blue)',
+            backgroundColor: simulatedShortfall ? '#FEE2E2' : '#EFF6FF',
+            border: `1px solid ${simulatedShortfall ? '#FCA5A5' : '#BFDBFE'}`,
+            color: simulatedShortfall ? '#DC2626' : 'var(--brand-blue)',
             cursor: 'pointer',
             fontWeight: '700',
-            fontSize: '11px'
+            fontSize: '12px'
           }}
         >
           {simulatedShortfall ? '← Reset to Real Neon DB State' : '⚡ Simulate Shortfall Risk Scenario'}

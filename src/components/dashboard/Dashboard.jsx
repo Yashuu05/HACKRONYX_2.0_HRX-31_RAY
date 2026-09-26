@@ -6,7 +6,6 @@ import TransactionsView from './TransactionsView';
 import AIChatWidget from './AIChatWidget';
 import SettingsView from './SettingsView';
 import AddTransactionModal from './AddTransactionModal';
-import { INITIAL_FORECAST_DATA } from '../../utils/mockData';
 import { saveUserCredentialsToFirebase } from '../../firebase';
 
 export default function Dashboard({ currentUser, onLogout }) {
@@ -21,48 +20,34 @@ export default function Dashboard({ currentUser, onLogout }) {
     setActiveTab('ai-chat');
   };
 
-  // Initial Mock Transactions for Student Persona (Riya Sharma)
-  const [transactions, setTransactions] = useState([
-    { id: 'tx-101', description: 'Family Bank Transfer', amount: 4000, type: 'income', category: 'Family Transfer', date: '2026-10-20', time: '10:30 AM', status: 'Completed' },
-    { id: 'tx-102', description: 'Mess & Hostel Fee Debit', amount: 2500, type: 'expense', category: 'Mess & Hostel', date: '2026-10-24', time: '09:15 AM', status: 'Protected' },
-    { id: 'tx-103', description: 'Laptop Screen Repair (UPI)', amount: 1800, type: 'expense', category: 'UPI Merchant', date: '2026-10-21', time: '04:45 PM', status: 'Completed' },
-    { id: 'tx-104', description: 'Swiggy Food Delivery', amount: 350, type: 'expense', category: 'UPI Merchant', date: '2026-10-18', time: '01:20 PM', status: 'Completed' },
-    { id: 'tx-105', description: 'College Canteen UPI', amount: 150, type: 'expense', category: 'UPI Merchant', date: '2026-10-17', time: '11:10 AM', status: 'Completed' },
-    { id: 'tx-106', description: 'Freelance Design Stipend', amount: 2000, type: 'income', category: 'Stipend / Salary', date: '2026-10-29', time: '05:00 PM', status: 'Scheduled' }
-  ]);
+  const [transactions, setTransactions] = useState([]);
 
-  const [forecastData, setForecastData] = useState(INITIAL_FORECAST_DATA);
+  // Sync user credentials with Firebase & fetch live transactions from Neon DB
+  const fetchLiveTransactions = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/transactions?user_id=usr-001');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success') {
+          setTransactions(data.transactions || []);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch live transactions in Dashboard parent component:', err);
+    }
+  };
 
-  // Sync user credentials with Firebase
   useEffect(() => {
     if (currentUser) {
       saveUserCredentialsToFirebase(currentUser);
     }
+    fetchLiveTransactions();
   }, [currentUser]);
 
   const handleAddTransaction = (newTx) => {
     setTransactions((prev) => [newTx, ...prev]);
-
-    // Recalculate forecast data dynamically
-    setForecastData((prev) => {
-      return prev.map((item) => {
-        if (newTx.type === 'expense') {
-          return {
-            ...item,
-            expected: Math.max(1000, item.expected - newTx.amount * 0.5),
-            best: Math.max(1000, item.best - newTx.amount * 0.4),
-            worst: Math.max(1000, item.worst - newTx.amount * 0.6)
-          };
-        } else {
-          return {
-            ...item,
-            expected: item.expected + newTx.amount * 0.8,
-            best: item.best + newTx.amount,
-            worst: item.worst + newTx.amount * 0.6
-          };
-        }
-      });
-    });
+    // Refresh live list from Neon DB
+    setTimeout(fetchLiveTransactions, 500);
   };
 
   return (
@@ -79,7 +64,6 @@ export default function Dashboard({ currentUser, onLogout }) {
         {activeTab === 'overview' && (
           <DashboardOverview
             transactions={transactions}
-            forecastData={forecastData}
             onOpenAddModal={() => setIsAddModalOpen(true)}
             onNavigateToChat={handleNavigateToChat}
           />
