@@ -76,7 +76,22 @@ async def stream_ai_chat_response(
                 "chat_history": chat_history_messages,
                 "user_input": query
             }):
-                text_content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+                text_content = ""
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+                    if isinstance(content, str):
+                        text_content = content
+                    elif isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict) and "text" in part:
+                                text_content += part["text"]
+                            elif isinstance(part, str):
+                                text_content += part
+                    else:
+                        text_content = str(content)
+                else:
+                    text_content = str(chunk)
+
                 if text_content:
                     token_payload = {
                         "event": "token",

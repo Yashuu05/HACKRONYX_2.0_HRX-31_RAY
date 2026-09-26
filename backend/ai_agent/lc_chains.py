@@ -28,19 +28,33 @@ from backend.ai_agent.lc_memory import format_feedback_in_context_block
 
 
 def load_llm_model():
-    """Initializes primary LLM using ChatGroq if API key is configured."""
-    has_groq = bool(os.getenv("GROQ_API_KEY"))
+    """Initializes primary LLM using ChatGoogleGenerativeAI (gemini-3.8-flash) or ChatGroq."""
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
+    if gemini_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            model = ChatGoogleGenerativeAI(
+                model="gemini-3.8-flash",
+                google_api_key=gemini_key,
+                temperature=0.2
+            )
+            return model, "gemini-3.8-flash (Google)"
+        except Exception as e:
+            print(f"[LangChain ChatGoogleGenerativeAI Warning] Failed to init gemini-3.8-flash: {e}")
+
+    has_groq = bool(os.getenv("GROQ_API_KEY"))
     if has_groq:
         try:
             from langchain_groq import ChatGroq
             model = ChatGroq(
-                model="openai/gpt-oss-120b",
+                model="llama-3.3-70b-versatile",
+                groq_api_key=os.getenv("GROQ_API_KEY"),
                 temperature=0.2
             )
-            return model, "openai/gpt-oss-120b (Groq)"
+            return model, "llama-3.3-70b-versatile (Groq)"
         except Exception as e:
-            print(f"[LangChain ChatGroq Warning] Failed to init gpt-oss-120b: {e}")
+            print(f"[LangChain ChatGroq Warning] Failed to init Groq: {e}")
 
     return None, "Deterministic Fallback Engine (Neon DB Grounded)"
 

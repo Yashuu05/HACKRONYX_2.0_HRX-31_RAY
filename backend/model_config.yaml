@@ -1,12 +1,12 @@
 text_model:
   default_model:
-    name: gpt-oss-20b
-    provider: groq
-    developer: openai
+    name: gemini-3.8-flash
+    provider: google
+    developer: google
     output_token_limit: 65536
-    input_token_limit: 131072
+    input_token_limit: 1048576
   backup_model:
-    name: gemini-3.5-flash
+    name: gemini-2.5-flash
     provider: google
     developer: google
     output_token_limit: 65536
@@ -14,4 +14,4 @@ text_model:
 open_source:
   name: qwen3:0.6b
   provider: ollama
-  developer: aibaba cloud
+  developer: alibaba cloud
