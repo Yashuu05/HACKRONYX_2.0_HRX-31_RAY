@@ -1,50 +1,115 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import DashboardNavbar from './DashboardNavbar';
+import DashboardOverview from './DashboardOverview';
+import AnalyticsView from './AnalyticsView';
+import TransactionsView from './TransactionsView';
+import AIChatWidget from './AIChatWidget';
+import SettingsView from './SettingsView';
+import AddTransactionModal from './AddTransactionModal';
+import { INITIAL_FORECAST_DATA } from '../../utils/mockData';
+import { saveUserCredentialsToFirebase } from '../../firebase';
 
 export default function Dashboard({ currentUser, onLogout }) {
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'analytics' | 'transactions' | 'ai-chat' | 'settings'
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [chatInitialQuery, setChatInitialQuery] = useState('');
+
+  const handleNavigateToChat = (queryText) => {
+    if (queryText) {
+      setChatInitialQuery(queryText);
+    }
+    setActiveTab('ai-chat');
+  };
+
+  // Initial Mock Transactions for Student Persona (Riya Sharma)
+  const [transactions, setTransactions] = useState([
+    { id: 'tx-101', description: 'Family Bank Transfer', amount: 4000, type: 'income', category: 'Family Transfer', date: '2026-10-20', time: '10:30 AM', status: 'Completed' },
+    { id: 'tx-102', description: 'Mess & Hostel Fee Debit', amount: 2500, type: 'expense', category: 'Mess & Hostel', date: '2026-10-24', time: '09:15 AM', status: 'Protected' },
+    { id: 'tx-103', description: 'Laptop Screen Repair (UPI)', amount: 1800, type: 'expense', category: 'UPI Merchant', date: '2026-10-21', time: '04:45 PM', status: 'Completed' },
+    { id: 'tx-104', description: 'Swiggy Food Delivery', amount: 350, type: 'expense', category: 'UPI Merchant', date: '2026-10-18', time: '01:20 PM', status: 'Completed' },
+    { id: 'tx-105', description: 'College Canteen UPI', amount: 150, type: 'expense', category: 'UPI Merchant', date: '2026-10-17', time: '11:10 AM', status: 'Completed' },
+    { id: 'tx-106', description: 'Freelance Design Stipend', amount: 2000, type: 'income', category: 'Stipend / Salary', date: '2026-10-29', time: '05:00 PM', status: 'Scheduled' }
+  ]);
+
+  const [forecastData, setForecastData] = useState(INITIAL_FORECAST_DATA);
+
+  // Sync user credentials with Firebase
+  useEffect(() => {
+    if (currentUser) {
+      saveUserCredentialsToFirebase(currentUser);
+    }
+  }, [currentUser]);
+
+  const handleAddTransaction = (newTx) => {
+    setTransactions((prev) => [newTx, ...prev]);
+
+    // Recalculate forecast data dynamically
+    setForecastData((prev) => {
+      return prev.map((item) => {
+        if (newTx.type === 'expense') {
+          return {
+            ...item,
+            expected: Math.max(1000, item.expected - newTx.amount * 0.5),
+            best: Math.max(1000, item.best - newTx.amount * 0.4),
+            worst: Math.max(1000, item.worst - newTx.amount * 0.6)
+          };
+        } else {
+          return {
+            ...item,
+            expected: item.expected + newTx.amount * 0.8,
+            best: item.best + newTx.amount,
+            worst: item.worst + newTx.amount * 0.6
+          };
+        }
+      });
+    });
+  };
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#0b0f19', color: '#f3f4f6', padding: '32px 24px' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', paddingBottom: '20px', borderBottom: '1px solid #1f2937' }}>
-          <div>
-            <h1 style={{ fontSize: '28px', fontWeight: 'bold', margin: 0 }}>AI Cashflow Guardian Dashboard</h1>
-            <p style={{ color: '#9ca3af', marginTop: '4px' }}>Welcome back, {currentUser?.full_name || 'User'} ({currentUser?.email})</p>
-          </div>
-          <button 
-            onClick={onLogout}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#374151',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600'
-            }}
-          >
-            Sign Out
-          </button>
-        </header>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-canvas)', display: 'flex', flexDirection: 'column' }}>
+      <DashboardNavbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onOpenAddModal={() => setIsAddModalOpen(true)}
+        currentUser={currentUser}
+        onLogout={onLogout}
+      />
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
-          <div style={{ backgroundColor: '#111827', padding: '24px', borderRadius: '12px', border: '1px solid #1f2937' }}>
-            <h3 style={{ color: '#10b981', marginTop: 0 }}>Safe-to-Spend Limit</h3>
-            <p style={{ fontSize: '36px', fontWeight: 'bold', margin: '12px 0' }}>₹4,250</p>
-            <p style={{ color: '#9ca3af', fontSize: '14px' }}>Safe until next stipend on Oct 1st after reserves</p>
-          </div>
+      <main className="container" style={{ flex: 1, padding: '32px 24px 60px 24px' }}>
+        {activeTab === 'overview' && (
+          <DashboardOverview
+            transactions={transactions}
+            forecastData={forecastData}
+            onOpenAddModal={() => setIsAddModalOpen(true)}
+            onNavigateToChat={handleNavigateToChat}
+          />
+        )}
 
-          <div style={{ backgroundColor: '#111827', padding: '24px', borderRadius: '12px', border: '1px solid #1f2937' }}>
-            <h3 style={{ color: '#3b82f6', marginTop: 0 }}>Upcoming Subscriptions & Bills</h3>
-            <p style={{ fontSize: '36px', fontWeight: 'bold', margin: '12px 0' }}>₹1,499</p>
-            <p style={{ color: '#9ca3af', fontSize: '14px' }}>3 recurring payments scheduled this month</p>
-          </div>
+        {activeTab === 'analytics' && (
+          <AnalyticsView currentUser={currentUser} transactions={transactions} />
+        )}
 
-          <div style={{ backgroundColor: '#111827', padding: '24px', borderRadius: '12px', border: '1px solid #1f2937' }}>
-            <h3 style={{ color: '#f59e0b', marginTop: 0 }}>Liquidity Risk Score</h3>
-            <p style={{ fontSize: '36px', fontWeight: 'bold', margin: '12px 0', color: '#10b981' }}>Low (12%)</p>
-            <p style={{ color: '#9ca3af', fontSize: '14px' }}>Buffer remains strong for upcoming unexpected expenses</p>
-          </div>
-        </div>
-      </div>
+        {activeTab === 'transactions' && (
+          <TransactionsView
+            transactions={transactions}
+            onOpenAddModal={() => setIsAddModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'ai-chat' && (
+          <AIChatWidget initialQuery={chatInitialQuery} currentUser={currentUser} />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsView currentUser={currentUser} onLogout={onLogout} />
+        )}
+      </main>
+
+      <AddTransactionModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onAddTransaction={handleAddTransaction}
+      />
     </div>
   );
 }
