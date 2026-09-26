@@ -1,12 +1,161 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, AlertTriangle, CheckCircle2, TrendingDown, Clock, ShieldCheck, ArrowRight, RefreshCw, Zap, Sparkles } from 'lucide-react';
 
-export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh, onNavigateToChat }) {
-  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
+// Client-side real-time shortfall evaluation helper
+function computeRealtimeShortfall(transactions = [], userConstants, summaryData) {
+  const getTxType = (t) => String(t.activity_type || t.type || 'expense').toLowerCase();
+  
+  const totalIncome = summaryData?.total_income !== undefined
+    ? Number(summaryData.total_income)
+    : transactions.filter(t => getTxType(t) === 'income').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    
+  const totalExpense = summaryData?.total_spendings !== undefined
+    ? Number(summaryData.total_spendings)
+    : transactions.filter(t => getTxType(t) === 'expense').reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    
+  const netBalance = summaryData?.net_balance !== undefined
+    ? Number(summaryData.net_balance)
+    : (totalIncome - totalExpense);
+
+  const safetyBuffer = Number(userConstants?.safety_buffer) || 2000;
+  const weeklyBudget = Number(userConstants?.budget_week) || 2500;
+  const dailyBurnBaseline = Math.round((weeklyBudget / 7.0) * 100) / 100;
+
+  const hasData = (transactions.length > 0) || (totalIncome > 0) || (totalExpense > 0);
+
+  if (!hasData) {
+    return {
+      hasData: false,
+      isShortfall: false,
+      riskScore: 0.0,
+      riskLevel: 'SAFE',
+      daysToShortfall: null,
+      maxDeficit: 0.0,
+      dailyBurnBaseline: dailyBurnBaseline,
+      reasons: [],
+      strategies: []
+    };
+  }
+
+  // 1. Immediate shortfall: current balance already below safety buffer
+  if (netBalance < safetyBuffer) {
+    const deficit = Math.round((safetyBuffer - netBalance) * 100) / 100;
+    const depthScore = Math.min(50, (deficit / (safetyBuffer + 1)) * 50);
+    const urgencyScore = 50.0;
+    const riskScore = Math.round(Math.min(100, Math.max(30, depthScore + urgencyScore)) * 10) / 10;
+    const riskLevel = riskScore >= 60 ? 'CRITICAL' : 'MODERATE';
+
+    return {
+      hasData: true,
+      isShortfall: true,
+      riskScore,
+      riskLevel,
+      daysToShortfall: 0, // 0 = Immediate / Today
+      maxDeficit: deficit,
+      dailyBurnBaseline: dailyBurnBaseline,
+      reasons: [
+        `Initial Net Balance (₹${netBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}) is already ₹${deficit.toLocaleString('en-IN', { minimumFractionDigits: 2 })} below your Safety Buffer (₹${safetyBuffer.toLocaleString('en-IN', { minimumFractionDigits: 2 })}).`,
+        `Immediate risk: Discretionary funds are depleted. Daily burn baseline is ₹${dailyBurnBaseline}/day.`,
+        `Safety buffer deficit requires immediate spending restraint or income replenishment.`
+      ],
+      strategies: [
+        {
+          id: 'strat-1',
+          title: 'Enforce Immediate Spending Freeze',
+          category: 'Immediate Prevention',
+          impact_label: `Protects remaining ₹${Math.max(0, netBalance).toLocaleString('en-IN')} cash`,
+          description: 'Halt all non-essential and discretionary purchases until new income is deposited.',
+          recommended_daily_limit: 0.0
+        },
+        {
+          id: 'strat-2',
+          title: 'Utilize Controlled Buffer Relief',
+          category: 'Buffer Management',
+          impact_label: `Bridges ₹${deficit.toLocaleString('en-IN')} deficit`,
+          description: 'Acknowledge safety reserve drawdown and schedule automatic replenishment upon next deposit.'
+        }
+      ]
+    };
+  }
+
+  // 2. Trajectory forecast over 14 days with daily burn baseline
+  let running = netBalance;
+  let firstDay = null;
+  let maxDeficit = 0;
+
+  for (let day = 1; day <= 14; day++) {
+    running = Math.round((running - dailyBurnBaseline) * 100) / 100;
+    if (running < safetyBuffer) {
+      const def = Math.round((safetyBuffer - running) * 100) / 100;
+      if (firstDay === null) firstDay = day;
+      if (def > maxDeficit) maxDeficit = def;
+    }
+  }
+
+  if (firstDay !== null) {
+    const depthScore = Math.min(50, (maxDeficit / (safetyBuffer + 1)) * 50);
+    const urgencyScore = Math.max(0, (15 - firstDay)) * 3.5;
+    const riskScore = Math.round(Math.min(100, Math.max(25, depthScore + urgencyScore)) * 10) / 10;
+    const riskLevel = riskScore >= 60 ? 'CRITICAL' : 'MODERATE';
+
+    return {
+      hasData: true,
+      isShortfall: true,
+      riskScore,
+      riskLevel,
+      daysToShortfall: firstDay,
+      maxDeficit,
+      dailyBurnBaseline: dailyBurnBaseline,
+      reasons: [
+        `Balance is projected to breach Safety Buffer in ${firstDay} day(s).`,
+        `Daily burn rate (₹${dailyBurnBaseline}/day) leads to an expected deficit of ₹${maxDeficit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
+        `Action needed: Cap discretionary expenses to extend liquidity runway.`
+      ],
+      strategies: [
+        {
+          id: 'strat-1',
+          title: 'Enforce Daily Safe-to-Spend Cap',
+          category: 'Immediate Prevention',
+          impact_label: `Saves ~₹${Math.round(dailyBurnBaseline * 0.5 * firstDay)} over ${firstDay} days`,
+          description: `Cap daily spend to ₹${Math.round(dailyBurnBaseline * 0.4)}/day to prevent buffer breach.`,
+          recommended_daily_limit: Math.round(dailyBurnBaseline * 0.4)
+        }
+      ]
+    };
+  }
+
+  return {
+    hasData: true,
+    isShortfall: false,
+    riskScore: 0.0,
+    riskLevel: 'SAFE',
+    daysToShortfall: null,
+    maxDeficit: 0.0,
+    dailyBurnBaseline: dailyBurnBaseline,
+    reasons: ['Your liquidity is healthy and predicted to remain safely above your safety buffer.'],
+    strategies: []
+  };
+}
+
+export default function ShortfallRiskCard({ 
+  currentUser, 
+  transactions = [], 
+  userConstants, 
+  summaryData, 
+  onApplyClamp, 
+  onRefresh, 
+  onNavigateToChat 
+}) {
+  const activeUserId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [simulatedShortfall, setSimulatedShortfall] = useState(false);
+
+  // Immediate 0ms client-side calculation from current transactions & constants
+  const clientEval = React.useMemo(() => {
+    return computeRealtimeShortfall(transactions, userConstants, summaryData);
+  }, [transactions, userConstants, summaryData]);
 
   const fetchShortfallAnalysis = async () => {
     setLoading(true);
@@ -21,32 +170,36 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
         throw new Error(json.message || 'Failed to fetch shortfall analysis');
       }
     } catch (err) {
-      console.warn('Shortfall analysis fetch fallback:', err);
-      setError(err.message);
+      console.warn('Shortfall analysis fetch notice: using real-time client metrics:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  // Immediately re-fetch and re-calculate whenever user, transactions, constants, or summary change
   useEffect(() => {
     fetchShortfallAnalysis();
-  }, [activeUserId]);
+  }, [activeUserId, transactions, userConstants, summaryData]);
 
   const analysis = data?.analysis || {};
   const reasoning = data?.reasoning || {};
-  const strategies = data?.mitigation_strategies || [];
+  const strategies = Array.isArray(data?.mitigation_strategies) ? data.mitigation_strategies : [];
 
-  // Toggle simulated shortfall for testing/demonstration in hackathon review
-  const activeRiskLevel = simulatedShortfall ? 'CRITICAL' : (analysis.risk_level || 'SAFE');
-  const activeRiskScore = simulatedShortfall ? 78.5 : (analysis.risk_score ?? 0.0);
-  const activeDaysToShortfall = simulatedShortfall ? 4 : analysis.days_until_shortfall;
-  const activeDeficit = simulatedShortfall ? 1850.00 : (analysis.max_shortfall_deficit ?? 0.0);
+  // Seamlessly merge server data with instant client evaluation
+  const isTriggered = simulatedShortfall || analysis?.is_shortfall_predicted || clientEval.isShortfall;
+  const activeRiskLevel = simulatedShortfall ? 'CRITICAL' : (analysis?.risk_level || clientEval.riskLevel);
+  const activeRiskScore = simulatedShortfall ? 78.5 : ((analysis?.risk_score !== undefined) ? analysis.risk_score : clientEval.riskScore);
+  const activeDaysToShortfall = simulatedShortfall ? 4 : ((analysis?.days_until_shortfall !== undefined) ? analysis.days_until_shortfall : clientEval.daysToShortfall);
+  const activeDeficit = simulatedShortfall ? 1850.00 : ((analysis?.max_shortfall_deficit !== undefined) ? analysis.max_shortfall_deficit : clientEval.maxDeficit);
+  const activeDailyBurn = (analysis?.daily_burn_baseline !== undefined) 
+    ? analysis.daily_burn_baseline 
+    : (analysis?.daily_burn_rate || clientEval.dailyBurnBaseline);
 
   const activeReasons = simulatedShortfall ? [
     'Initial Net Balance is slim compared to upcoming mandatory hostel/mess debits.',
-    'Daily baseline spending velocity (₹714.29/day) exceeds remaining surplus before stipend date.',
-    'Shortfall of ₹1,850.00 predicted on Day 4 (2026-09-24) below Safety Buffer.'
-  ] : (reasoning.primary_factors || []);
+    'Daily baseline spending velocity exceeds remaining surplus before stipend date.',
+    'Shortfall predicted below configured Safety Buffer.'
+  ] : ((reasoning?.primary_factors && reasoning.primary_factors.length > 0) ? reasoning.primary_factors : clientEval.reasons);
 
   const activeStrategies = simulatedShortfall ? [
     {
@@ -54,17 +207,10 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
       title: 'Enforce Daily Safe-to-Spend Cap',
       category: 'Immediate Prevention',
       impact_label: 'Saves ~₹1,200.00 over 4 days',
-      description: 'Cap daily non-essential spend to ₹250.00/day (a reduction of ₹464.29/day) until shortfall window passes.',
+      description: 'Cap daily non-essential spend to prevent buffer breach.',
       recommended_daily_limit: 250.00
-    },
-    {
-      id: 'strat-2',
-      title: 'Postpone Discretionary Purchases',
-      category: 'Expense Management',
-      impact_label: 'Frees up ₹1,850.00 liquidity deficit',
-      description: 'Defer non-essential purchases (clothing, electronics) until after stipend credit.'
     }
-  ] : (Array.isArray(strategies) ? strategies : []);
+  ] : (strategies.length > 0 ? strategies : clientEval.strategies);
 
   const formatCurrency = (val, fallback = 0) => {
     const num = Number(val ?? fallback);
@@ -103,7 +249,7 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>(14-Day Horizon)</span>
             </div>
             <p className="body-sm" style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '12px' }}>
-              Proactive algorithm calculating balance trajectory against Safety Buffer (₹{formatCurrency(analysis.safety_buffer, 3000)})
+              Proactive algorithm calculating balance trajectory against Safety Buffer (₹{formatCurrency(userConstants?.safety_buffer || analysis?.safety_buffer, 2000)})
             </p>
           </div>
         </div>
@@ -158,7 +304,9 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
         <div>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>DAYS TO SHORTFALL</div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: (activeDaysToShortfall !== null && activeDaysToShortfall !== undefined) ? '#DC2626' : 'var(--text-primary)' }}>
-            {(activeDaysToShortfall !== null && activeDaysToShortfall !== undefined) ? `${activeDaysToShortfall} Day(s)` : 'None (Safe)'}
+            {activeDaysToShortfall === 0
+              ? 'Today (Immediate)'
+              : ((activeDaysToShortfall !== null && activeDaysToShortfall !== undefined) ? `${activeDaysToShortfall} Day(s)` : 'None (Safe)')}
           </div>
         </div>
 
@@ -172,13 +320,13 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
         <div>
           <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>DAILY BURN BASELINE</div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-primary)' }}>
-            ₹ {formatCurrency((analysis.has_enough_data === false && !simulatedShortfall) ? 0 : (analysis.daily_burn_rate ?? (simulatedShortfall ? 714.29 : 0)), 0)} <span style={{ fontSize: '11px', fontWeight: '500' }}>/day</span>
+            ₹ {formatCurrency(activeDailyBurn, 2)} <span style={{ fontSize: '11px', fontWeight: '500' }}>/day</span>
           </div>
         </div>
       </div>
 
       {/* Algorithmic & LLM Root Cause Reasoning (Only expand when shortfall is detected or simulation button clicked) */}
-      {(simulatedShortfall || analysis.is_shortfall_predicted) && (
+      {isTriggered && (
         <>
           <div style={{ marginBottom: '18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -198,7 +346,7 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
                 gap: '4px'
               }}>
                 <Sparkles size={11} />
-                {reasoning.llm_output?.ai_model_used || 'Gemini 3.5 Flash (google)'}
+                {reasoning?.llm_output?.ai_model_used || 'openai/gpt-oss-120b (Groq)'}
               </span>
             </div>
             <div style={{
@@ -214,7 +362,7 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
                 <div style={{ fontWeight: '700', color: isCritical ? '#991B1B' : '#92400E' }}>
                   {simulatedShortfall
                     ? 'Shortfall of ₹1,850.00 predicted on Day 4. Balance trajectory will breach Safety Buffer.'
-                    : (reasoning.summary_reason || 'Liquidity deficit detected within forecast horizon.')}
+                    : (reasoning?.summary_reason || clientEval?.reasons?.[0] || 'Liquidity deficit detected within forecast horizon.')}
                 </div>
                 {Array.isArray(activeReasons) && activeReasons.map((factor, i) => (
                   <div key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -235,7 +383,7 @@ export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh
                 </div>
                 {onNavigateToChat && (
                   <button
-                    onClick={() => onNavigateToChat(reasoning.summary_reason || "How can I adjust my spending to prevent the predicted shortfall?")}
+                    onClick={() => onNavigateToChat(reasoning?.summary_reason || clientEval?.reasons?.[0] || "How can I adjust my spending to prevent the predicted shortfall?")}
                     className="btn btn-sm"
                     style={{
                       backgroundColor: '#EEF2FF',

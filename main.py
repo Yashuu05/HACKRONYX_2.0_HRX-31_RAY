@@ -38,11 +38,13 @@ class SignUpRequest(BaseModel):
     full_name: str
     email: EmailStr
     password: str
+    firebase_uid: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    firebase_uid: Optional[str] = None
 
 
 class AuthResponse(BaseModel):
@@ -79,9 +81,13 @@ def signup(payload: SignUpRequest):
             detail="Password must be at least 6 characters long."
         )
 
+    # Use firebase_uid directly if present to guarantee 1:1 match with Neon DB
+    user_id = payload.firebase_uid if payload.firebase_uid else f"usr-{uuid.uuid4().hex[:8]}"
+
     # Create new user record
     new_user = {
-        "id": f"usr-{uuid.uuid4().hex[:6]}",
+        "id": user_id,
+        "user_id": user_id,
         "full_name": payload.full_name.strip(),
         "email": email_clean,
         "password": payload.password,  # Mock store
@@ -128,23 +134,52 @@ def signup(payload: SignUpRequest):
 def login(payload: LoginRequest):
     email_clean = payload.email.lower().strip()
 
-    # Rule 1: Verify email exists
+    # Rule 1: Verify email exists or restore if firebase_uid is provided
     if email_clean not in MOCK_USERS_DB:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password. Please check your credentials and try again."
-        )
+        if payload.firebase_uid:
+            user_id = payload.firebase_uid
+            user_name = email_clean.split("@")[0].capitalize()
+            try:
+                from db.database import get_db_connection
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM users WHERE user_id = %s LIMIT 1;", (user_id,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    user_name = row[0]
+                cur.close()
+                conn.close()
+            except Exception:
+                pass
+
+            MOCK_USERS_DB[email_clean] = {
+                "id": user_id,
+                "user_id": user_id,
+                "full_name": user_name,
+                "email": email_clean,
+                "password": payload.password,
+                "created_at": "2026-09-26T12:00:00Z"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password. Please check your credentials and try again."
+            )
 
     user = MOCK_USERS_DB[email_clean]
 
-    # Rule 2: Verify password matches
-    if user["password"] != payload.password:
+    # Rule 2: Verify password matches (skip check if authenticated via Firebase)
+    if not payload.firebase_uid and user.get("password") and user["password"] != payload.password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password. Please check your credentials and try again."
         )
 
-    # Generate mock access token
+    # Sync user_id if firebase_uid was supplied
+    if payload.firebase_uid:
+        user["id"] = payload.firebase_uid
+        user["user_id"] = payload.firebase_uid
+
     token = f"mock-jwt-token-{uuid.uuid4().hex}"
 
     return AuthResponse(
@@ -170,16 +205,24 @@ class GoogleAuthRequest(BaseModel):
 def google_auth(payload: GoogleAuthRequest):
     email_clean = payload.email.lower().strip()
 
+    # CRITICAL: Always use full firebase_uid to preserve exact user_id across sign-in/out
+    user_id = payload.firebase_uid if payload.firebase_uid else f"usr-{uuid.uuid4().hex[:8]}"
+
     if email_clean not in MOCK_USERS_DB:
-        uid_prefix = payload.firebase_uid[:8] if payload.firebase_uid else uuid.uuid4().hex[:6]
-        user_id = f"usr-{uid_prefix}"
         MOCK_USERS_DB[email_clean] = {
             "id": user_id,
+            "user_id": user_id,
             "full_name": payload.full_name or email_clean.split("@")[0].capitalize(),
             "email": email_clean,
             "password": "",  # OAuth
             "created_at": "2026-09-26T12:00:00Z"
         }
+    else:
+        if payload.firebase_uid:
+            MOCK_USERS_DB[email_clean]["id"] = payload.firebase_uid
+            MOCK_USERS_DB[email_clean]["user_id"] = payload.firebase_uid
+        if payload.full_name:
+            MOCK_USERS_DB[email_clean]["full_name"] = payload.full_name
 
     user = MOCK_USERS_DB[email_clean]
 
@@ -687,13 +730,14 @@ def get_analytics(
     granularity: str = "weekly"
 ):
     """
-    Fetch comprehensive financial analytics directly from Neon PostgreSQL using SQL aggregations.
-    Includes category breakdowns, time series trends, spending-to-income ratios, top merchants, and day-of-week patterns.
+    Fetch comprehensive financial analytics directly from Neon PostgreSQL using single-roundtrip query.
+    Aggregates category breakdowns, time series trends, spending-to-income ratios, top merchants, and day-of-week patterns.
     """
     try:
         from db.database import get_db_connection
         from psycopg2.extras import RealDictCursor
         import datetime
+        from collections import defaultdict
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -711,114 +755,141 @@ def get_analytics(
             min_date = today - datetime.timedelta(days=180)
         elif timeframe == "1y":
             min_date = today - datetime.timedelta(days=365)
-        # 'all' leaves min_date = None
 
         date_clause = ""
-        params_base = [user_id]
+        params = [user_id]
         if min_date:
             date_clause = " AND transaction_date >= %s"
-            params_base.append(min_date)
+            params.append(min_date)
 
-        # 2. Expense Category Breakdown
-        expense_cat_query = f"""
-            SELECT category, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
+        # Single round-trip fetch of all relevant transactions for this user & timeframe
+        query = f"""
+            SELECT 
+                transaction_id,
+                activity_type,
+                category,
+                amount,
+                COALESCE(description, category) AS description,
+                transaction_date,
+                EXTRACT(ISODOW FROM transaction_date)::int AS dow
             FROM transactions
-            WHERE user_id = %s AND activity_type = 'expense' {date_clause}
-            GROUP BY category
-            ORDER BY total_amount DESC;
+            WHERE user_id = %s {date_clause}
+            ORDER BY transaction_date ASC;
         """
-        cur.execute(expense_cat_query, params_base)
-        expense_cat_rows = cur.fetchall()
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
 
-        # 3. Income Category Breakdown
-        income_cat_query = f"""
-            SELECT category, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
-            FROM transactions
-            WHERE user_id = %s AND activity_type = 'income' {date_clause}
-            GROUP BY category
-            ORDER BY total_amount DESC;
-        """
-        cur.execute(income_cat_query, params_base)
-        income_cat_rows = cur.fetchall()
+        # In-memory fast aggregations (takes < 1ms in Python)
+        total_income = 0.0
+        total_expense = 0.0
+        expense_cats = defaultdict(lambda: {"amount": 0.0, "count": 0})
+        income_cats = defaultdict(lambda: {"amount": 0.0, "count": 0})
+        merchants_map = defaultdict(lambda: {"amount": 0.0, "count": 0, "category": ""})
+        dow_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        dow_map = {i: {"day": dow_names[i-1], "amount": 0.0, "count": 0} for i in range(1, 8)}
+        periods_map = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
 
-        # 4. Overall Totals & Ratios
-        total_income = sum(float(r['total_amount']) for r in income_cat_rows)
-        total_expense = sum(float(r['total_amount']) for r in expense_cat_rows)
+        for row in rows:
+            amt = float(row['amount'])
+            act_type = str(row['activity_type']).lower()
+            cat = str(row['category'] or 'Other')
+            desc = str(row['description'] or cat)
+            t_date = row['transaction_date']
+
+            if act_type == 'income':
+                total_income += amt
+                income_cats[cat]["amount"] += amt
+                income_cats[cat]["count"] += 1
+            else:
+                total_expense += amt
+                expense_cats[cat]["amount"] += amt
+                expense_cats[cat]["count"] += 1
+                merchants_map[desc]["amount"] += amt
+                merchants_map[desc]["count"] += 1
+                merchants_map[desc]["category"] = cat
+
+                dow = row.get('dow')
+                if dow and 1 <= int(dow) <= 7:
+                    dow_map[int(dow)]["amount"] += amt
+                    dow_map[int(dow)]["count"] += 1
+
+            # Time series period key
+            if granularity.lower() == 'weekly':
+                # Start of week (Monday)
+                period_start = (t_date - datetime.timedelta(days=t_date.weekday())).strftime("%Y-%m-%d")
+            else:
+                period_start = t_date.strftime("%Y-%m-01")
+
+            if act_type == 'income':
+                periods_map[period_start]["income"] += amt
+            else:
+                periods_map[period_start]["expense"] += amt
+
+        # Format expense categories sorted by total amount descending
+        sorted_expense_cats = sorted(
+            [
+                {
+                    "category": k,
+                    "amount": round(v["amount"], 2),
+                    "count": v["count"],
+                    "percentage": round((v["amount"] / total_expense * 100), 1) if total_expense > 0 else 0
+                }
+                for k, v in expense_cats.items()
+            ],
+            key=lambda x: x["amount"],
+            reverse=True
+        )
+
+        # Format income categories
+        sorted_income_cats = sorted(
+            [
+                {
+                    "category": k,
+                    "amount": round(v["amount"], 2),
+                    "count": v["count"],
+                    "percentage": round((v["amount"] / total_income * 100), 1) if total_income > 0 else 0
+                }
+                for k, v in income_cats.items()
+            ],
+            key=lambda x: x["amount"],
+            reverse=True
+        )
+
+        # Format top 6 merchants
+        sorted_merchants = sorted(
+            [
+                {
+                    "name": k,
+                    "category": v["category"],
+                    "amount": round(v["amount"], 2),
+                    "count": v["count"]
+                }
+                for k, v in merchants_map.items()
+            ],
+            key=lambda x: x["amount"],
+            reverse=True
+        )[:6]
+
+        # Format timeseries sorted by period
+        sorted_timeseries = [
+            {
+                "period": p,
+                "income": round(vals["income"], 2),
+                "expense": round(vals["expense"], 2),
+                "net": round(vals["income"] - vals["expense"], 2)
+            }
+            for p, vals in sorted(periods_map.items(), key=lambda x: x[0])
+        ]
+
         net_saved = round(total_income - total_expense, 2)
-        
         spending_ratio = round((total_expense / total_income * 100), 1) if total_income > 0 else (100.0 if total_expense > 0 else 0.0)
         savings_rate = round((net_saved / total_income * 100), 1) if total_income > 0 else 0.0
-
         days_count = (today - min_date).days if min_date else 30
         if days_count <= 0:
             days_count = 1
         avg_daily_spend = round(total_expense / days_count, 2)
-
-        # 5. Time Series (Weekly or Monthly)
-        trunc_unit = 'week' if granularity.lower() == 'weekly' else 'month'
-        timeseries_query = f"""
-            SELECT 
-                DATE_TRUNC('{trunc_unit}', transaction_date)::date AS period_start,
-                activity_type,
-                COALESCE(SUM(amount), 0) AS total_amount
-            FROM transactions
-            WHERE user_id = %s {date_clause}
-            GROUP BY period_start, activity_type
-            ORDER BY period_start ASC;
-        """
-        cur.execute(timeseries_query, params_base)
-        ts_rows = cur.fetchall()
-
-        # Map timeseries rows into periods
-        periods_map = {}
-        for r in ts_rows:
-            p_str = r['period_start'].strftime("%Y-%m-%d")
-            if p_str not in periods_map:
-                periods_map[p_str] = {"period": p_str, "income": 0.0, "expense": 0.0, "net": 0.0}
-            amt = float(r['total_amount'])
-            if r['activity_type'] == 'income':
-                periods_map[p_str]['income'] += amt
-            else:
-                periods_map[p_str]['expense'] += amt
-            periods_map[p_str]['net'] = round(periods_map[p_str]['income'] - periods_map[p_str]['expense'], 2)
-
-        timeseries = list(periods_map.values())
-
-        # 6. Top Merchants / Descriptions
-        merchants_query = f"""
-            SELECT COALESCE(description, category) AS name, category, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
-            FROM transactions
-            WHERE user_id = %s AND activity_type = 'expense' {date_clause}
-            GROUP BY COALESCE(description, category), category
-            ORDER BY total_amount DESC
-            LIMIT 6;
-        """
-        cur.execute(merchants_query, params_base)
-        merchant_rows = cur.fetchall()
-
-        # 7. Day of Week Pattern
-        dow_query = f"""
-            SELECT EXTRACT(ISODOW FROM transaction_date)::int AS dow, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
-            FROM transactions
-            WHERE user_id = %s AND activity_type = 'expense' {date_clause}
-            GROUP BY dow
-            ORDER BY dow;
-        """
-        cur.execute(dow_query, params_base)
-        dow_rows = cur.fetchall()
-        
-        dow_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-        dow_map = {i: {"day": dow_names[i-1], "amount": 0.0, "count": 0} for i in range(1, 8)}
-        for r in dow_rows:
-            d_idx = int(r['dow'])
-            if 1 <= d_idx <= 7:
-                dow_map[d_idx]["amount"] = float(r['total_amount'])
-                dow_map[d_idx]["count"] = int(r['count'])
-
-        dow_pattern = list(dow_map.values())
-
-        cur.close()
-        conn.close()
 
         return {
             "status": "success",
@@ -832,35 +903,11 @@ def get_analytics(
                 "savings_rate": savings_rate,
                 "avg_daily_spend": avg_daily_spend
             },
-            "expense_categories": [
-                {
-                    "category": r['category'],
-                    "amount": float(r['total_amount']),
-                    "count": int(r['count']),
-                    "percentage": round((float(r['total_amount']) / total_expense * 100), 1) if total_expense > 0 else 0
-                }
-                for r in expense_cat_rows
-            ],
-            "income_categories": [
-                {
-                    "category": r['category'],
-                    "amount": float(r['total_amount']),
-                    "count": int(r['count']),
-                    "percentage": round((float(r['total_amount']) / total_income * 100), 1) if total_income > 0 else 0
-                }
-                for r in income_cat_rows
-            ],
-            "timeseries": timeseries,
-            "top_merchants": [
-                {
-                    "name": r['name'],
-                    "category": r['category'],
-                    "amount": float(r['total_amount']),
-                    "count": int(r['count'])
-                }
-                for r in merchant_rows
-            ],
-            "dow_pattern": dow_pattern
+            "expense_categories": sorted_expense_cats,
+            "income_categories": sorted_income_cats,
+            "timeseries": sorted_timeseries,
+            "top_merchants": sorted_merchants,
+            "dow_pattern": list(dow_map.values())
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error generating analytics: {str(e)}")
@@ -881,8 +928,20 @@ def get_shortfall_analysis(user_id: str = "usr-001", horizon_days: int = 14):
         )
 
         trajectory_data = calculate_shortfall_trajectory(user_id=user_id, horizon_days=horizon_days)
-        reasoning_data = analyze_shortfall_reasons(trajectory_data)
-        mitigation_strategies = generate_mitigation_strategies(trajectory_data, reasoning_data)
+        try:
+            reasoning_data = analyze_shortfall_reasons(trajectory_data)
+        except Exception as r_err:
+            print(f"[Shortfall Reasoning Warning] {r_err}")
+            reasoning_data = {
+                "summary_reason": f"Projected deficit of ₹{trajectory_data.get('max_deficit', 0):,.2f} below safety buffer.",
+                "primary_factors": ["Daily burn exceeds remaining balance", "Balance below safety buffer threshold"],
+                "risk_status": trajectory_data.get("risk_level", "SAFE")
+            }
+        try:
+            mitigation_strategies = generate_mitigation_strategies(trajectory_data, reasoning_data)
+        except Exception as m_err:
+            print(f"[Shortfall Mitigation Warning] {m_err}")
+            mitigation_strategies = []
 
         return {
             "status": "success",
@@ -891,7 +950,29 @@ def get_shortfall_analysis(user_id: str = "usr-001", horizon_days: int = 14):
             "mitigation_strategies": mitigation_strategies
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Shortfall analysis error: {str(e)}")
+        print(f"[Shortfall Endpoint Error] {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "analysis": {
+                "user_id": user_id,
+                "horizon_days": horizon_days,
+                "has_enough_data": False,
+                "current_balance": 0.0,
+                "net_balance": 0.0,
+                "safety_buffer": 2000.0,
+                "daily_burn_baseline": 357.14,
+                "daily_burn_rate": 357.14,
+                "is_shortfall_predicted": False,
+                "risk_score": 0.0,
+                "risk_level": "SAFE",
+                "days_until_shortfall": None,
+                "max_shortfall_deficit": 0.0,
+                "trajectory": []
+            },
+            "reasoning": {"summary_reason": "No data available", "primary_factors": []},
+            "mitigation_strategies": []
+        }
 
 
 
@@ -1303,11 +1384,13 @@ class SignUpRequest(BaseModel):
     full_name: str
     email: EmailStr
     password: str
+    firebase_uid: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    firebase_uid: Optional[str] = None
 
 
 class AuthResponse(BaseModel):
@@ -1344,9 +1427,13 @@ def signup(payload: SignUpRequest):
             detail="Password must be at least 6 characters long."
         )
 
+    # Use firebase_uid directly if present to guarantee 1:1 match with Neon DB
+    user_id = payload.firebase_uid if payload.firebase_uid else f"usr-{uuid.uuid4().hex[:8]}"
+
     # Create new user record
     new_user = {
-        "id": f"usr-{uuid.uuid4().hex[:6]}",
+        "id": user_id,
+        "user_id": user_id,
         "full_name": payload.full_name.strip(),
         "email": email_clean,
         "password": payload.password,  # Mock store
@@ -1393,23 +1480,52 @@ def signup(payload: SignUpRequest):
 def login(payload: LoginRequest):
     email_clean = payload.email.lower().strip()
 
-    # Rule 1: Verify email exists
+    # Rule 1: Verify email exists or restore if firebase_uid is provided
     if email_clean not in MOCK_USERS_DB:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password. Please check your credentials and try again."
-        )
+        if payload.firebase_uid:
+            user_id = payload.firebase_uid
+            user_name = email_clean.split("@")[0].capitalize()
+            try:
+                from db.database import get_db_connection
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM users WHERE user_id = %s LIMIT 1;", (user_id,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    user_name = row[0]
+                cur.close()
+                conn.close()
+            except Exception:
+                pass
+
+            MOCK_USERS_DB[email_clean] = {
+                "id": user_id,
+                "user_id": user_id,
+                "full_name": user_name,
+                "email": email_clean,
+                "password": payload.password,
+                "created_at": "2026-09-26T12:00:00Z"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password. Please check your credentials and try again."
+            )
 
     user = MOCK_USERS_DB[email_clean]
 
-    # Rule 2: Verify password matches
-    if user["password"] != payload.password:
+    # Rule 2: Verify password matches (skip check if authenticated via Firebase)
+    if not payload.firebase_uid and user.get("password") and user["password"] != payload.password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password. Please check your credentials and try again."
         )
 
-    # Generate mock access token
+    # Sync user_id if firebase_uid was supplied
+    if payload.firebase_uid:
+        user["id"] = payload.firebase_uid
+        user["user_id"] = payload.firebase_uid
+
     token = f"mock-jwt-token-{uuid.uuid4().hex}"
 
     return AuthResponse(
@@ -1435,16 +1551,24 @@ class GoogleAuthRequest(BaseModel):
 def google_auth(payload: GoogleAuthRequest):
     email_clean = payload.email.lower().strip()
 
+    # CRITICAL: Always use full firebase_uid to preserve exact user_id across sign-in/out
+    user_id = payload.firebase_uid if payload.firebase_uid else f"usr-{uuid.uuid4().hex[:8]}"
+
     if email_clean not in MOCK_USERS_DB:
-        uid_prefix = payload.firebase_uid[:8] if payload.firebase_uid else uuid.uuid4().hex[:6]
-        user_id = f"usr-{uid_prefix}"
         MOCK_USERS_DB[email_clean] = {
             "id": user_id,
+            "user_id": user_id,
             "full_name": payload.full_name or email_clean.split("@")[0].capitalize(),
             "email": email_clean,
             "password": "",  # OAuth
             "created_at": "2026-09-26T12:00:00Z"
         }
+    else:
+        if payload.firebase_uid:
+            MOCK_USERS_DB[email_clean]["id"] = payload.firebase_uid
+            MOCK_USERS_DB[email_clean]["user_id"] = payload.firebase_uid
+        if payload.full_name:
+            MOCK_USERS_DB[email_clean]["full_name"] = payload.full_name
 
     user = MOCK_USERS_DB[email_clean]
 
@@ -1952,13 +2076,14 @@ def get_analytics(
     granularity: str = "weekly"
 ):
     """
-    Fetch comprehensive financial analytics directly from Neon PostgreSQL using SQL aggregations.
-    Includes category breakdowns, time series trends, spending-to-income ratios, top merchants, and day-of-week patterns.
+    Fetch comprehensive financial analytics directly from Neon PostgreSQL using single-roundtrip query.
+    Aggregates category breakdowns, time series trends, spending-to-income ratios, top merchants, and day-of-week patterns.
     """
     try:
         from db.database import get_db_connection
         from psycopg2.extras import RealDictCursor
         import datetime
+        from collections import defaultdict
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -1976,114 +2101,141 @@ def get_analytics(
             min_date = today - datetime.timedelta(days=180)
         elif timeframe == "1y":
             min_date = today - datetime.timedelta(days=365)
-        # 'all' leaves min_date = None
 
         date_clause = ""
-        params_base = [user_id]
+        params = [user_id]
         if min_date:
             date_clause = " AND transaction_date >= %s"
-            params_base.append(min_date)
+            params.append(min_date)
 
-        # 2. Expense Category Breakdown
-        expense_cat_query = f"""
-            SELECT category, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
+        # Single round-trip fetch of all relevant transactions for this user & timeframe
+        query = f"""
+            SELECT 
+                transaction_id,
+                activity_type,
+                category,
+                amount,
+                COALESCE(description, category) AS description,
+                transaction_date,
+                EXTRACT(ISODOW FROM transaction_date)::int AS dow
             FROM transactions
-            WHERE user_id = %s AND activity_type = 'expense' {date_clause}
-            GROUP BY category
-            ORDER BY total_amount DESC;
+            WHERE user_id = %s {date_clause}
+            ORDER BY transaction_date ASC;
         """
-        cur.execute(expense_cat_query, params_base)
-        expense_cat_rows = cur.fetchall()
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
 
-        # 3. Income Category Breakdown
-        income_cat_query = f"""
-            SELECT category, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
-            FROM transactions
-            WHERE user_id = %s AND activity_type = 'income' {date_clause}
-            GROUP BY category
-            ORDER BY total_amount DESC;
-        """
-        cur.execute(income_cat_query, params_base)
-        income_cat_rows = cur.fetchall()
+        # In-memory fast aggregations (takes < 1ms in Python)
+        total_income = 0.0
+        total_expense = 0.0
+        expense_cats = defaultdict(lambda: {"amount": 0.0, "count": 0})
+        income_cats = defaultdict(lambda: {"amount": 0.0, "count": 0})
+        merchants_map = defaultdict(lambda: {"amount": 0.0, "count": 0, "category": ""})
+        dow_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        dow_map = {i: {"day": dow_names[i-1], "amount": 0.0, "count": 0} for i in range(1, 8)}
+        periods_map = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
 
-        # 4. Overall Totals & Ratios
-        total_income = sum(float(r['total_amount']) for r in income_cat_rows)
-        total_expense = sum(float(r['total_amount']) for r in expense_cat_rows)
+        for row in rows:
+            amt = float(row['amount'])
+            act_type = str(row['activity_type']).lower()
+            cat = str(row['category'] or 'Other')
+            desc = str(row['description'] or cat)
+            t_date = row['transaction_date']
+
+            if act_type == 'income':
+                total_income += amt
+                income_cats[cat]["amount"] += amt
+                income_cats[cat]["count"] += 1
+            else:
+                total_expense += amt
+                expense_cats[cat]["amount"] += amt
+                expense_cats[cat]["count"] += 1
+                merchants_map[desc]["amount"] += amt
+                merchants_map[desc]["count"] += 1
+                merchants_map[desc]["category"] = cat
+
+                dow = row.get('dow')
+                if dow and 1 <= int(dow) <= 7:
+                    dow_map[int(dow)]["amount"] += amt
+                    dow_map[int(dow)]["count"] += 1
+
+            # Time series period key
+            if granularity.lower() == 'weekly':
+                # Start of week (Monday)
+                period_start = (t_date - datetime.timedelta(days=t_date.weekday())).strftime("%Y-%m-%d")
+            else:
+                period_start = t_date.strftime("%Y-%m-01")
+
+            if act_type == 'income':
+                periods_map[period_start]["income"] += amt
+            else:
+                periods_map[period_start]["expense"] += amt
+
+        # Format expense categories sorted by total amount descending
+        sorted_expense_cats = sorted(
+            [
+                {
+                    "category": k,
+                    "amount": round(v["amount"], 2),
+                    "count": v["count"],
+                    "percentage": round((v["amount"] / total_expense * 100), 1) if total_expense > 0 else 0
+                }
+                for k, v in expense_cats.items()
+            ],
+            key=lambda x: x["amount"],
+            reverse=True
+        )
+
+        # Format income categories
+        sorted_income_cats = sorted(
+            [
+                {
+                    "category": k,
+                    "amount": round(v["amount"], 2),
+                    "count": v["count"],
+                    "percentage": round((v["amount"] / total_income * 100), 1) if total_income > 0 else 0
+                }
+                for k, v in income_cats.items()
+            ],
+            key=lambda x: x["amount"],
+            reverse=True
+        )
+
+        # Format top 6 merchants
+        sorted_merchants = sorted(
+            [
+                {
+                    "name": k,
+                    "category": v["category"],
+                    "amount": round(v["amount"], 2),
+                    "count": v["count"]
+                }
+                for k, v in merchants_map.items()
+            ],
+            key=lambda x: x["amount"],
+            reverse=True
+        )[:6]
+
+        # Format timeseries sorted by period
+        sorted_timeseries = [
+            {
+                "period": p,
+                "income": round(vals["income"], 2),
+                "expense": round(vals["expense"], 2),
+                "net": round(vals["income"] - vals["expense"], 2)
+            }
+            for p, vals in sorted(periods_map.items(), key=lambda x: x[0])
+        ]
+
         net_saved = round(total_income - total_expense, 2)
-        
         spending_ratio = round((total_expense / total_income * 100), 1) if total_income > 0 else (100.0 if total_expense > 0 else 0.0)
         savings_rate = round((net_saved / total_income * 100), 1) if total_income > 0 else 0.0
-
         days_count = (today - min_date).days if min_date else 30
         if days_count <= 0:
             days_count = 1
         avg_daily_spend = round(total_expense / days_count, 2)
-
-        # 5. Time Series (Weekly or Monthly)
-        trunc_unit = 'week' if granularity.lower() == 'weekly' else 'month'
-        timeseries_query = f"""
-            SELECT 
-                DATE_TRUNC('{trunc_unit}', transaction_date)::date AS period_start,
-                activity_type,
-                COALESCE(SUM(amount), 0) AS total_amount
-            FROM transactions
-            WHERE user_id = %s {date_clause}
-            GROUP BY period_start, activity_type
-            ORDER BY period_start ASC;
-        """
-        cur.execute(timeseries_query, params_base)
-        ts_rows = cur.fetchall()
-
-        # Map timeseries rows into periods
-        periods_map = {}
-        for r in ts_rows:
-            p_str = r['period_start'].strftime("%Y-%m-%d")
-            if p_str not in periods_map:
-                periods_map[p_str] = {"period": p_str, "income": 0.0, "expense": 0.0, "net": 0.0}
-            amt = float(r['total_amount'])
-            if r['activity_type'] == 'income':
-                periods_map[p_str]['income'] += amt
-            else:
-                periods_map[p_str]['expense'] += amt
-            periods_map[p_str]['net'] = round(periods_map[p_str]['income'] - periods_map[p_str]['expense'], 2)
-
-        timeseries = list(periods_map.values())
-
-        # 6. Top Merchants / Descriptions
-        merchants_query = f"""
-            SELECT COALESCE(description, category) AS name, category, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
-            FROM transactions
-            WHERE user_id = %s AND activity_type = 'expense' {date_clause}
-            GROUP BY COALESCE(description, category), category
-            ORDER BY total_amount DESC
-            LIMIT 6;
-        """
-        cur.execute(merchants_query, params_base)
-        merchant_rows = cur.fetchall()
-
-        # 7. Day of Week Pattern
-        dow_query = f"""
-            SELECT EXTRACT(ISODOW FROM transaction_date)::int AS dow, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
-            FROM transactions
-            WHERE user_id = %s AND activity_type = 'expense' {date_clause}
-            GROUP BY dow
-            ORDER BY dow;
-        """
-        cur.execute(dow_query, params_base)
-        dow_rows = cur.fetchall()
-        
-        dow_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-        dow_map = {i: {"day": dow_names[i-1], "amount": 0.0, "count": 0} for i in range(1, 8)}
-        for r in dow_rows:
-            d_idx = int(r['dow'])
-            if 1 <= d_idx <= 7:
-                dow_map[d_idx]["amount"] = float(r['total_amount'])
-                dow_map[d_idx]["count"] = int(r['count'])
-
-        dow_pattern = list(dow_map.values())
-
-        cur.close()
-        conn.close()
 
         return {
             "status": "success",
@@ -2097,35 +2249,11 @@ def get_analytics(
                 "savings_rate": savings_rate,
                 "avg_daily_spend": avg_daily_spend
             },
-            "expense_categories": [
-                {
-                    "category": r['category'],
-                    "amount": float(r['total_amount']),
-                    "count": int(r['count']),
-                    "percentage": round((float(r['total_amount']) / total_expense * 100), 1) if total_expense > 0 else 0
-                }
-                for r in expense_cat_rows
-            ],
-            "income_categories": [
-                {
-                    "category": r['category'],
-                    "amount": float(r['total_amount']),
-                    "count": int(r['count']),
-                    "percentage": round((float(r['total_amount']) / total_income * 100), 1) if total_income > 0 else 0
-                }
-                for r in income_cat_rows
-            ],
-            "timeseries": timeseries,
-            "top_merchants": [
-                {
-                    "name": r['name'],
-                    "category": r['category'],
-                    "amount": float(r['total_amount']),
-                    "count": int(r['count'])
-                }
-                for r in merchant_rows
-            ],
-            "dow_pattern": dow_pattern
+            "expense_categories": sorted_expense_cats,
+            "income_categories": sorted_income_cats,
+            "timeseries": sorted_timeseries,
+            "top_merchants": sorted_merchants,
+            "dow_pattern": list(dow_map.values())
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error generating analytics: {str(e)}")
@@ -2146,8 +2274,20 @@ def get_shortfall_analysis(user_id: str = "usr-001", horizon_days: int = 14):
         )
 
         trajectory_data = calculate_shortfall_trajectory(user_id=user_id, horizon_days=horizon_days)
-        reasoning_data = analyze_shortfall_reasons(trajectory_data)
-        mitigation_strategies = generate_mitigation_strategies(trajectory_data, reasoning_data)
+        try:
+            reasoning_data = analyze_shortfall_reasons(trajectory_data)
+        except Exception as r_err:
+            print(f"[Shortfall Reasoning Warning] {r_err}")
+            reasoning_data = {
+                "summary_reason": f"Projected deficit of ₹{trajectory_data.get('max_deficit', 0):,.2f} below safety buffer.",
+                "primary_factors": ["Daily burn exceeds remaining balance", "Balance below safety buffer threshold"],
+                "risk_status": trajectory_data.get("risk_level", "SAFE")
+            }
+        try:
+            mitigation_strategies = generate_mitigation_strategies(trajectory_data, reasoning_data)
+        except Exception as m_err:
+            print(f"[Shortfall Mitigation Warning] {m_err}")
+            mitigation_strategies = []
 
         return {
             "status": "success",
@@ -2156,7 +2296,29 @@ def get_shortfall_analysis(user_id: str = "usr-001", horizon_days: int = 14):
             "mitigation_strategies": mitigation_strategies
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Shortfall analysis error: {str(e)}")
+        print(f"[Shortfall Endpoint Error] {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "analysis": {
+                "user_id": user_id,
+                "horizon_days": horizon_days,
+                "has_enough_data": False,
+                "current_balance": 0.0,
+                "net_balance": 0.0,
+                "safety_buffer": 2000.0,
+                "daily_burn_baseline": 357.14,
+                "daily_burn_rate": 357.14,
+                "is_shortfall_predicted": False,
+                "risk_score": 0.0,
+                "risk_level": "SAFE",
+                "days_until_shortfall": None,
+                "max_shortfall_deficit": 0.0,
+                "trajectory": []
+            },
+            "reasoning": {"summary_reason": "No data available", "primary_factors": []},
+            "mitigation_strategies": []
+        }
 
 
 

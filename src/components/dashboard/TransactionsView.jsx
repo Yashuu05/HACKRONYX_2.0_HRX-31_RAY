@@ -2,16 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { Search, Download, ArrowUpRight, ArrowDownLeft, RefreshCw, AlertCircle } from 'lucide-react';
 
 export default function TransactionsView({ transactions: propTransactions, onOpenAddModal, currentUser }) {
-  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
+  const activeUserId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [filterType, setFilterType] = useState('all'); // 'all' | 'income' | 'expense' | 'essential'
   const [searchQuery, setSearchQuery] = useState('');
-  const [dbTransactions, setDbTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [dbTransactions, setDbTransactions] = useState(() => (propTransactions && propTransactions.length > 0 ? propTransactions : []));
+  const [loading, setLoading] = useState(() => (!propTransactions || propTransactions.length === 0));
   const [error, setError] = useState(null);
+
+  // Sync propTransactions immediately if dbTransactions is empty
+  useEffect(() => {
+    if (propTransactions && propTransactions.length > 0 && dbTransactions.length === 0) {
+      setDbTransactions(propTransactions);
+      setLoading(false);
+    }
+  }, [propTransactions]);
 
   // Fetch real-time transactions from Neon PostgreSQL backend
   const fetchTransactionsFromDB = async () => {
-    setLoading(true);
+    // Only show full loading block if we don't already have transactions to display
+    if (dbTransactions.length === 0 && (!propTransactions || propTransactions.length === 0)) {
+      setLoading(true);
+    }
     setError(null);
     try {
       let url = `http://localhost:8000/api/transactions?user_id=${encodeURIComponent(activeUserId)}&activity_type=${filterType}`;
@@ -29,7 +40,7 @@ export default function TransactionsView({ transactions: propTransactions, onOpe
         throw new Error(data.message || 'Failed to fetch transactions');
       }
     } catch (err) {
-      console.warn('PostgreSQL fetch fallback to local state:', err);
+      console.warn('PostgreSQL fetch fallback to current state:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -40,26 +51,31 @@ export default function TransactionsView({ transactions: propTransactions, onOpe
     fetchTransactionsFromDB();
   }, [filterType, searchQuery, activeUserId]);
 
-  // Use database transactions if available, otherwise fallback to props
-  const displayList = dbTransactions.length > 0 || !error ? dbTransactions : propTransactions.map(t => ({
-    transaction_id: t.id,
-    description: t.description,
-    category: t.category,
-    activity_type: t.type,
-    amount: t.amount,
-    transaction_date: t.date,
-    transaction_time: t.time || '10:00 AM',
+  // Normalize source transactions from PostgreSQL or props format
+  const sourceList = (dbTransactions && dbTransactions.length > 0)
+    ? dbTransactions
+    : ((propTransactions && propTransactions.length > 0) ? propTransactions : []);
+
+  const displayList = sourceList.map((t) => ({
+    transaction_id: t.transaction_id || t.id,
+    description: t.description || 'Transaction',
+    category: t.category || 'General',
+    activity_type: t.activity_type || t.type || 'expense',
+    amount: Number(t.amount) || 0,
+    transaction_date: t.transaction_date || t.date || new Date().toISOString().split('T')[0],
+    transaction_time: t.transaction_time || t.time || '10:00 AM',
     status: t.status || 'Completed',
-    net_balance: t.type === 'income' ? t.amount : -t.amount
+    net_balance: t.net_balance !== undefined ? t.net_balance : ((t.activity_type === 'income' || t.type === 'income') ? Number(t.amount) : -Number(t.amount))
   }));
 
   const filteredTx = displayList.filter((tx) => {
     // If essential filter is selected client-side
     if (filterType === 'essential') {
-      return (tx.category.toLowerCase().includes('mess') || 
-              tx.category.toLowerCase().includes('hostel') || 
-              tx.category.toLowerCase().includes('rent') ||
-              tx.category.toLowerCase().includes('utility'));
+      const cat = (tx.category || '').toLowerCase();
+      return (cat.includes('mess') || 
+              cat.includes('hostel') || 
+              cat.includes('rent') ||
+              cat.includes('utility'));
     }
     return true;
   });
@@ -154,7 +170,7 @@ export default function TransactionsView({ transactions: propTransactions, onOpe
 
       {/* Transactions Table */}
       <div className="card" style={{ backgroundColor: '#FFFFFF', padding: 0, overflow: 'hidden' }}>
-        {loading ? (
+        {loading && displayList.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px auto', display: 'block', color: 'var(--brand-blue)' }} />
             <span>Fetching live transaction records from PostgreSQL...</span>

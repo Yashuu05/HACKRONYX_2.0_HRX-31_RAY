@@ -13,19 +13,19 @@ from psycopg2.extras import RealDictCursor
 
 
 def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
-    """Fetches user constants, recent balance, and income/expense totals from Neon PostgreSQL."""
+    """Fetches user constants, recent balance, and income/expense totals strictly from Neon PostgreSQL."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # 1. Fetch user constants
+        # 1. Fetch user constants (defaults to 0 if no record exists)
         cur.execute(
             "SELECT budget_month, budget_week, safety_buffer FROM constants WHERE user_id = %s ORDER BY created_at DESC LIMIT 1;",
             (user_id,)
         )
-        const_row = cur.fetchone() or {"budget_month": 10000, "budget_week": 5000, "safety_buffer": 3000}
+        const_row = cur.fetchone() or {"budget_month": 0, "budget_week": 0, "safety_buffer": 0}
 
-        # 2. Fetch income/expense summary
+        # 2. Fetch income/expense summary for the exact user
         cur.execute(
             "SELECT activity_type, COALESCE(SUM(amount), 0) AS total, COUNT(*) as count FROM transactions WHERE user_id = %s GROUP BY activity_type;",
             (user_id,)
@@ -47,9 +47,10 @@ def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
                 total_expense += tot
                 expense_count += cnt
 
+        has_data = (income_count + expense_count) > 0
         net_balance = round(total_income - total_expense, 2)
 
-        # 3. Fetch protected commitments (e.g. status = 'Protected' or recurring categories)
+        # 3. Fetch protected commitments (status = 'Protected' or recurring categories)
         cur.execute(
             """
             SELECT description, category, amount, transaction_date::text as date, status 
@@ -63,26 +64,23 @@ def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
         total_protected = sum(float(r['amount']) for r in protected_rows)
 
         # 4. Compute Dynamic Safe-to-Spend
-        safety_buffer = float(const_row['safety_buffer'])
-        # Safe to spend = Max(0, Net balance - protected commitments - safety buffer)
-        # For a student context, if net balance is active:
-        safe_to_spend = max(0.0, round(net_balance - total_protected - (safety_buffer * 0.5), 2))
-        if safe_to_spend == 0.0 and net_balance > 0:
-            safe_to_spend = max(500.0, round(net_balance * 0.4, 2))
+        safety_buffer = float(const_row.get('safety_buffer', 0) or 0)
+        safe_to_spend = max(0.0, round(net_balance - total_protected - (safety_buffer * 0.5), 2)) if has_data else 0.0
 
         cur.close()
         conn.close()
 
         return {
             "user_id": user_id,
+            "has_data": has_data,
             "net_balance": net_balance,
             "total_income": total_income,
             "total_expense": total_expense,
             "income_count": income_count,
             "expense_count": expense_count,
             "safety_buffer": safety_buffer,
-            "budget_month": float(const_row['budget_month']),
-            "budget_week": float(const_row['budget_week']),
+            "budget_month": float(const_row.get('budget_month', 0) or 0),
+            "budget_week": float(const_row.get('budget_week', 0) or 0),
             "safe_to_spend": safe_to_spend,
             "total_protected": total_protected,
             "protected_commitments": [
@@ -92,22 +90,20 @@ def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
         }
     except Exception as e:
         print(f"[Metrics Engine Error] {e}")
-        # Fallback default values
         return {
             "user_id": user_id,
-            "net_balance": 4500.0,
-            "total_income": 6000.0,
-            "total_expense": 6549.0,
-            "income_count": 2,
-            "expense_count": 6,
-            "safety_buffer": 3000.0,
-            "budget_month": 10000.0,
-            "budget_week": 5000.0,
-            "safe_to_spend": 3450.0,
-            "total_protected": 2500.0,
-            "protected_commitments": [
-                {"name": "College Mess & Hostel Fee", "amount": 2500.0, "date": "2026-10-24"}
-            ]
+            "has_data": False,
+            "net_balance": 0.0,
+            "total_income": 0.0,
+            "total_expense": 0.0,
+            "income_count": 0,
+            "expense_count": 0,
+            "safety_buffer": 0.0,
+            "budget_month": 0.0,
+            "budget_week": 0.0,
+            "safe_to_spend": 0.0,
+            "total_protected": 0.0,
+            "protected_commitments": []
         }
 
 
@@ -115,20 +111,28 @@ def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
 def get_safe_to_spend_tool(user_id: str = "usr-001") -> str:
     """Fetches user's exact real-time Safe-to-Spend limit, current net balance, and protected bill commitments."""
     profile = fetch_user_financial_profile(user_id)
+    if not profile.get("has_data"):
+        return "no data found"
+
+    commitments_str = (
+        ", ".join([f"{p['name']} ₹{p['amount']:,.2f} on {p['date']}" for p in profile['protected_commitments']])
+        if profile['protected_commitments'] else "None"
+    )
     return (
         f"Safe-to-Spend Limit: ₹{profile['safe_to_spend']:,.2f}\n"
         f"Current Net Balance: ₹{profile['net_balance']:,.2f}\n"
         f"Safety Buffer: ₹{profile['safety_buffer']:,.2f}\n"
-        f"Protected Commitments: Total ₹{profile['total_protected']:,.2f} ("
-        + ", ".join([f"{p['name']} ₹{p['amount']:,.2f} on {p['date']}" for p in profile['protected_commitments']])
-        + ")"
+        f"Protected Commitments: Total ₹{profile['total_protected']:,.2f} ({commitments_str})"
     )
 
 
 @tool
 def check_affordability_tool(user_id: str = "usr-001", amount: float = 0.0, category: str = "general") -> str:
-    """Analyzes if user can safely afford spending a specific amount (e.g. for a weekend trip or purchase) without risking liquidity shortfall."""
+    """Analyzes if user can safely afford spending a specific amount without risking liquidity shortfall."""
     profile = fetch_user_financial_profile(user_id)
+    if not profile.get("has_data"):
+        return "no data found"
+
     safe = profile['safe_to_spend']
     net = profile['net_balance']
     buffer = profile['safety_buffer']
@@ -136,26 +140,22 @@ def check_affordability_tool(user_id: str = "usr-001", amount: float = 0.0, cate
     if amount <= safe:
         margin = safe - amount
         return (
-            f"AFFORDABLE: Yes, user can afford spending ₹{amount:,.2f}.\n"
+            f"AFFORDABLE: Yes, you can afford spending ₹{amount:,.2f}.\n"
             f"Current Safe-to-Spend: ₹{safe:,.2f}.\n"
-            f"Remaining Safe-to-Spend after purchase: ₹{margin:,.2f}.\n"
-            f"Upcoming commitments (₹{profile['total_protected']:,.2f}) remain 100% protected."
+            f"Remaining Safe-to-Spend after purchase: ₹{margin:,.2f}."
         )
     else:
         deficit = amount - safe
         post_balance = net - amount
         return (
-            f"NOT RECOMMENDED / HIGH RISK: Spending ₹{amount:,.2f} exceeds Safe-to-Spend limit (₹{safe:,.2f}) by ₹{deficit:,.2f}.\n"
-            f"Current Net Balance: ₹{net:,.2f}. Post-purchase balance: ₹{post_balance:,.2f}.\n"
-            f"Risk: Breaches safety buffer (₹{buffer:,.2f}) and risks unpaid protected commitments ("
-            + ", ".join([f"{p['name']} ₹{p['amount']:,.2f}" for p in profile['protected_commitments']])
-            + "). Recommend capping expenditure or deferring until next income credit."
+            f"NOT RECOMMENDED: Spending ₹{amount:,.2f} exceeds Safe-to-Spend limit (₹{safe:,.2f}) by ₹{deficit:,.2f}.\n"
+            f"Current Net Balance: ₹{net:,.2f}. Post-purchase balance: ₹{post_balance:,.2f}."
         )
 
 
 @tool
 def get_category_spending_tool(user_id: str = "usr-001", timeframe: str = "30d") -> str:
-    """Fetches categorized breakdown of expenses over the given timeframe (30d, 7d, all)."""
+    """Fetches categorized breakdown of expenses over the given timeframe."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -173,6 +173,9 @@ def get_category_spending_tool(user_id: str = "usr-001", timeframe: str = "30d")
         cur.close()
         conn.close()
 
+        if not rows:
+            return "no data found"
+
         total = sum(float(r['total_amount']) for r in rows)
         lines = [f"Total Expenses ({timeframe}): ₹{total:,.2f}"]
         for r in rows:
@@ -181,50 +184,93 @@ def get_category_spending_tool(user_id: str = "usr-001", timeframe: str = "30d")
             lines.append(f"- {r['category']}: ₹{amt:,.2f} ({pct}%, {r['count']} transactions)")
         return "\n".join(lines)
     except Exception as e:
-        return (
-            "Categorized Spend Breakdown:\n"
-            "- Mess & Hostel: ₹2,500.00 (38.2%, 1 txn)\n"
-            "- UPI Merchant: ₹2,300.00 (35.1%, 3 txns)\n"
-            "- Food & Canteen: ₹1,250.00 (19.1%, 6 txns)\n"
-            "- Subscriptions: ₹499.00 (7.6%, 1 txn)"
-        )
+        print(f"[get_category_spending_tool Error] {e}")
+        return "no data found"
 
 
-@tool
-def get_timeframe_category_spend_tool(user_id: str = "usr-001", category: str = "food", days: int = 7) -> str:
-    """Fetches exact transactions and total spent for a specific category within the last N days."""
+CATEGORY_SYNONYMS = {
+    "food": ["food", "canteen", "swiggy", "zomato", "mess", "dining", "groceries", "grocery", "snack", "snacks", "lunch", "dinner", "breakfast", "beverage", "beverages", "cafe", "restaurant"],
+    "travel": ["travel", "trip", "transport", "cab", "uber", "ola", "auto", "metro", "bus", "train", "flight", "petrol", "fuel"],
+    "shopping": ["shopping", "amazon", "flipkart", "clothing", "clothes", "shoes", "electronics", "gadget", "gadgets", "myntra"],
+    "utilities": ["utility", "utilities", "electricity", "water", "wifi", "internet", "broadband", "recharge", "phone bill", "bill", "bills"],
+    "rent": ["rent", "hostel", "pg", "maintenance", "flat", "room"],
+    "entertainment": ["entertainment", "movie", "movies", "cinema", "netflix", "spotify", "hotstar", "prime", "game", "gaming"],
+    "education": ["tuition", "books", "book", "course", "fees", "exam", "college fee", "school fee", "stationery"],
+    "medical": ["medical", "medicine", "medicines", "doctor", "hospital", "pharmacy", "health", "clinic"]
+}
+
+
+def check_user_category_data(user_id: str, search_terms: List[str]) -> Dict[str, Any]:
+    """
+    Directly queries PostgreSQL transactions for user_id to verify if matching expense records exist.
+    Guarantees 0 fallback / 0 hallucination.
+    """
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        min_date = datetime.date.today() - datetime.timedelta(days=days)
-        cur.execute(
-            """
+        
+        conditions = []
+        params = [user_id]
+        for term in search_terms:
+            t = term.lower().strip()
+            if t:
+                conditions.append("(LOWER(category) LIKE %s OR LOWER(description) LIKE %s)")
+                params.extend([f"%{t}%", f"%{t}%"])
+        
+        if not conditions:
+            cur.close()
+            conn.close()
+            return {"has_data": False, "total": 0.0, "count": 0, "transactions": []}
+            
+        sql = f"""
             SELECT description, category, amount, transaction_date::text as date 
             FROM transactions 
-            WHERE user_id = %s AND activity_type = 'expense' AND LOWER(category) LIKE %s AND transaction_date >= %s
+            WHERE user_id = %s 
+              AND activity_type = 'expense' 
+              AND ({' OR '.join(conditions)})
             ORDER BY transaction_date DESC;
-            """,
-            (user_id, f"%{category.lower()}%", min_date)
-        )
+        """
+        cur.execute(sql, tuple(params))
         rows = cur.fetchall()
         cur.close()
         conn.close()
 
         if not rows:
-            # Fallback to general search without date if few test records exist
-            return f"Found 4 transactions in '{category}' totaling ₹850.00: Swiggy ₹350, Campus Canteen ₹150, Canteen UPI ₹200, Swiggy Snack ₹150."
+            return {"has_data": False, "total": 0.0, "count": 0, "transactions": []}
 
         total = sum(float(r['amount']) for r in rows)
-        items = [f"{r['description'] or r['category']}: ₹{float(r['amount']):,.2f} on {r['date']}" for r in rows]
-        return f"Total spent on {category} in last {days} days: ₹{total:,.2f} across {len(rows)} transactions ({'; '.join(items)})."
+        return {
+            "has_data": True,
+            "total": round(total, 2),
+            "count": len(rows),
+            "transactions": rows
+        }
     except Exception as e:
-        return f"Total spent on {category} in last {days} days: ₹850.00 across 4 transactions: Swiggy UPI ₹350, Campus Canteen ₹150, Canteen UPI ₹200, Swiggy ₹150."
+        print(f"[check_user_category_data Error] {e}")
+        return {"has_data": False, "total": 0.0, "count": 0, "transactions": []}
+
+
+@tool
+def get_timeframe_category_spend_tool(user_id: str = "usr-001", category: str = "food", days: int = 7) -> str:
+    """Fetches exact transactions and total spent for a specific category within the last N days."""
+    cat_lower = category.lower().strip()
+    search_terms = CATEGORY_SYNONYMS.get(cat_lower, [cat_lower])
+    res = check_user_category_data(user_id=user_id, search_terms=search_terms)
+    
+    if not res["has_data"] or res["count"] == 0:
+        return "no data found"
+        
+    items = [f"{r['description'] or r['category']}: ₹{float(r['amount']):,.2f} on {r['date']}" for r in res["transactions"]]
+    return f"Total spent on {category}: ₹{res['total']:,.2f} across {res['count']} transaction(s) ({'; '.join(items)})."
 
 
 @tool
 def get_ledger_summary_tool(user_id: str = "usr-001") -> str:
     """Fetches high level summary of all user income, expenses, and net cashflow balance."""
     profile = fetch_user_financial_profile(user_id)
+    if not profile.get("has_data"):
+        return "no data found"
+
     return (
         f"Transaction Ledger Summary:\n"
         f"- Total Income: ₹{profile['total_income']:,.2f} ({profile['income_count']} transactions)\n"
@@ -237,12 +283,16 @@ def get_ledger_summary_tool(user_id: str = "usr-001") -> str:
 
 @tool
 def get_savings_advice_tool(user_id: str = "usr-001") -> str:
-    """Generates personalized savings recommendations based on discretionary categories."""
+    """Generates personalized savings recommendations based on user's real transactions."""
     profile = fetch_user_financial_profile(user_id)
+    if not profile.get("has_data") or profile['total_expense'] == 0:
+        return "no data found"
+
     spending_ratio = round((profile['total_expense'] / profile['total_income'] * 100), 1) if profile['total_income'] > 0 else 100.0
     return (
         f"Savings Analysis:\n"
         f"- Spending-to-Income Ratio: {spending_ratio}%\n"
-        f"- Discretionary Outflows: Subscriptions (₹499/mo), Food Delivery & Snacks (~₹1,250/mo)\n"
-        f"- Actionable Savings Steps: 1) Cancel unused OTT subscriptions to save ₹499/mo. 2) Shift 2 Swiggy orders/week to campus canteen to save ~₹500/mo. 3) Reserve ₹3,000 safety buffer on stipend deposit day."
+        f"- Total Outflows: ₹{profile['total_expense']:,.2f}\n"
+        f"- Net Balance: ₹{profile['net_balance']:,.2f}"
     )
+

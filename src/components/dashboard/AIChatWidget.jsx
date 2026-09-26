@@ -76,7 +76,7 @@ function renderFormattedContent(text, isUser = false) {
 }
 
 export default function AIChatWidget({ initialQuery, currentUser }) {
-  const userId = currentUser?.id || 'usr-001';
+  const userId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [messages, setMessages] = useState([INIT_MESSAGE]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
@@ -272,9 +272,9 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
           msg.id === botMsgId
             ? {
                 ...msg,
-                text: `Based on your real-time cashflow from Neon PostgreSQL, your current Safe-to-Spend limit is ₹3,450.00. Upcoming protected commitments (College Mess Fee ₹2,500 on Oct 24) remain secured against shortfall risks.`,
+                text: 'no data found',
                 traceId: 'TR-LC-FALLBACK',
-                modelUsed: 'Deterministic Fallback',
+                modelUsed: 'Fallback Engine',
                 isStreaming: false
               }
             : msg

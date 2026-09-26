@@ -28,7 +28,7 @@ export default function SettingsView({ currentUser, onLogout }) {
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const userId = currentUser?.user_id || currentUser?.id || 'usr-001';
+  const userId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
 
   const fetchFeedbackList = async () => {
     try {

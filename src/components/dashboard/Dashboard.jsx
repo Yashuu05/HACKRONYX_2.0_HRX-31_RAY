@@ -20,7 +20,7 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
     setActiveTab('ai-chat');
   };
 
-  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
+  const activeUserId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [transactions, setTransactions] = useState([]);
 
   const fetchLiveTransactions = async () => {

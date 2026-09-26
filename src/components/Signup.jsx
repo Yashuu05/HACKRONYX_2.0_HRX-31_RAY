@@ -64,10 +64,11 @@ export default function SignUp({ onNavigateSignIn, onSignUpSuccess }) {
         console.warn('Backend sync skipped or offline, proceeding with Firebase user session:', backendErr);
       }
 
-      const activeUser = backendUser || {
+      const activeUser = {
+        ...(backendUser || {}),
         id: firebaseUser.id,
         user_id: firebaseUser.id,
-        full_name: firebaseUser.full_name,
+        full_name: (backendUser && (backendUser.full_name || backendUser.name)) || firebaseUser.full_name || 'Google User',
         email: firebaseUser.email,
         photo_url: firebaseUser.photo_url
       };
@@ -144,14 +145,20 @@ export default function SignUp({ onNavigateSignIn, onSignUpSuccess }) {
         body: JSON.stringify({
           full_name: cleanName,
           email: cleanEmail,
-          password: password
+          password: password,
+          firebase_uid: createdUser ? createdUser.id : null
         })
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        createdUser = data.user;
+        createdUser = {
+          ...(createdUser || {}),
+          ...data.user,
+          id: (createdUser && createdUser.id) || data.user.user_id || data.user.id,
+          user_id: (createdUser && createdUser.id) || data.user.user_id || data.user.id
+        };
         userToken = data.access_token || userToken;
         saveUserCredentialsToFirebase(createdUser);
       } else if (!createdUser) {

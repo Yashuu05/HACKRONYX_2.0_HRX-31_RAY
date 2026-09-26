@@ -39,7 +39,7 @@ const PAYMENT_METHODS = [
 ];
 
 export default function AddTransactionModal({ isOpen, onClose, onAddTransaction, currentUser }) {
-  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
+  const activeUserId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
 
   // Modal Mode: 'form' | 'natural_language' | 'file_upload'
   const [entryMode, setEntryMode] = useState('form');
@@ -157,10 +157,12 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
         onAddTransaction({
           id: createdTx.transaction_id,
           description: createdTx.description,
-          amount: createdTx.amount,
+          amount: parseFloat(createdTx.amount),
           type: createdTx.activity_type,
+          activity_type: createdTx.activity_type,
           category: createdTx.category,
           date: createdTx.transaction_date,
+          transaction_date: createdTx.transaction_date,
           time: createdTx.transaction_time,
           status: createdTx.status
         });
@@ -181,8 +183,10 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
         description: description.trim(),
         amount: parseFloat(amount),
         type: type,
+        activity_type: type,
         category: category,
         date: date,
+        transaction_date: date,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         status: 'Completed'
       });
@@ -224,10 +228,12 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
         onAddTransaction({
           id: createdTx.transaction_id,
           description: createdTx.description,
-          amount: createdTx.amount,
+          amount: parseFloat(createdTx.amount),
           type: createdTx.activity_type,
+          activity_type: createdTx.activity_type,
           category: createdTx.category,
           date: createdTx.transaction_date,
+          transaction_date: createdTx.transaction_date,
           time: createdTx.transaction_time,
           status: createdTx.status
         });

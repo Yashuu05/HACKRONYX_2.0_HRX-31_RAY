@@ -18,11 +18,11 @@ import {
 import ShortfallRiskCard from './ShortfallRiskCard';
 
 export default function DashboardOverview({ transactions, onOpenAddModal, onNavigateToChat, currentUser }) {
-  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
+  const activeUserId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [horizonDays, setHorizonDays] = useState(14);
   const [hoveredPoint, setHoveredPoint] = useState(null);
-  const [recentTransactions, setRecentTransactions] = useState([]);
-  const [loadingRecent, setLoadingRecent] = useState(true);
+  const [recentTransactions, setRecentTransactions] = useState(() => (Array.isArray(transactions) && transactions.length > 0 ? transactions.slice(0, 5) : []));
+  const [loadingRecent, setLoadingRecent] = useState(() => (!Array.isArray(transactions) || transactions.length === 0));
   const [recentError, setRecentError] = useState(null);
   const [shortfallTrajectory, setShortfallTrajectory] = useState([]);
 
@@ -38,7 +38,9 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
 
   // Fetch top 5 recent account transactions directly from Neon PostgreSQL
   const fetchRecentTransactions = async () => {
-    setLoadingRecent(true);
+    if (recentTransactions.length === 0 && (!transactions || transactions.length === 0)) {
+      setLoadingRecent(true);
+    }
     setRecentError(null);
     try {
       const response = await fetch(`http://localhost:8000/api/transactions/recent?user_id=${encodeURIComponent(activeUserId)}&limit=5`);
@@ -155,33 +157,64 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
     return isNaN(num) ? '0.00' : num.toLocaleString('en-IN', { minimumFractionDigits: minDecimals });
   };
 
-  // Generate real forecast chart points from shortfallTrajectory or real balance
-  const displayedData = Array.isArray(shortfallTrajectory) && shortfallTrajectory.length > 0
-    ? shortfallTrajectory.slice(0, horizonDays).map((t) => ({
-        day: `Day ${t.day}`,
-        date: t.date,
-        expected: t.projected_balance,
-        best: roundNum(t.projected_balance * 1.04),
-        worst: roundNum(t.projected_balance * 0.96),
-        event: t.is_shortfall ? `Buffer Deficit: ₹${t.shortfall_deficit}` : 'Balanced Spend'
-      }))
-    : [];
+  const roundNum = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const dailyBurnBaseline = roundNum((budgetWeek || 2500) / 7.0);
 
-  function roundNum(n) {
-    return Math.round(n * 100) / 100;
-  }
+  // Real-time deterministic local trajectory computed instantly from current bank balance and daily burn
+  const localTrajectory = React.useMemo(() => {
+    const pts = [];
+    let curBal = currentBankBalance;
+    const now = new Date();
+    for (let i = 1; i <= horizonDays; i++) {
+      curBal = roundNum(curBal - dailyBurnBaseline);
+      const isShortfall = curBal < safetyBuffer;
+      const deficit = isShortfall ? roundNum(safetyBuffer - curBal) : 0;
+      const d = new Date(now.getTime() + i * 86400000);
+      pts.push({
+        day: i,
+        date: d.toISOString().split('T')[0],
+        projected_balance: curBal,
+        is_shortfall: isShortfall,
+        shortfall_deficit: deficit
+      });
+    }
+    return pts;
+  }, [currentBankBalance, dailyBurnBaseline, safetyBuffer, horizonDays]);
+
+  // Generate real forecast chart points from server shortfallTrajectory or instant local deterministic trajectory
+  const rawTrajectory = (Array.isArray(shortfallTrajectory) && shortfallTrajectory.length > 0)
+    ? shortfallTrajectory
+    : (hasEnoughData ? localTrajectory : []);
+
+  const displayedData = rawTrajectory.slice(0, horizonDays).map((t) => {
+    const projBal = Number(t?.projected_balance) || 0;
+    return {
+      day: `Day ${t?.day ?? ''}`,
+      date: t?.date || '',
+      expected: projBal,
+      best: roundNum(projBal * 1.04),
+      worst: roundNum(projBal * 0.96),
+      event: t?.is_shortfall ? `Buffer Deficit: ₹${roundNum(t?.shortfall_deficit ?? 0)}` : 'Balanced Spend'
+    };
+  });
 
   // SVG Chart math
   const width = 680;
   const height = 220;
   const padding = 28;
 
-  const vals = displayedData.map(d => d.expected);
-  const maxVal = displayedData.length > 0 ? Math.max(...vals, 10000) : 12000;
-  const minVal = displayedData.length > 0 ? Math.min(...vals, 0) : 0;
+  const vals = displayedData.map(d => Number(d.expected) || 0);
+  const rawMax = (displayedData.length > 0 && vals.length > 0) ? Math.max(...vals, 10000) : 12000;
+  const rawMin = (displayedData.length > 0 && vals.length > 0) ? Math.min(...vals, 0) : 0;
+  const safeMax = (!isNaN(rawMax) && isFinite(rawMax)) ? rawMax : 12000;
+  const safeMin = (!isNaN(rawMin) && isFinite(rawMin)) ? rawMin : 0;
+  const valRange = Math.max(1, safeMax - safeMin);
 
   const getX = (i) => padding + (i * (width - 2 * padding)) / Math.max(1, displayedData.length - 1);
-  const getY = (val) => height - padding - (((Number(val) || 0) - minVal) / Math.max(1, maxVal - minVal)) * (height - 2 * padding);
+  const getY = (val) => {
+    const num = Number(val) || 0;
+    return height - padding - ((num - safeMin) / valRange) * (height - 2 * padding);
+  };
 
   const expectedPoints = displayedData.map((d, i) => `${getX(i)},${getY(d.expected)}`).join(' L ');
   const bestPoints = displayedData.map((d, i) => `${getX(i)},${getY(d.best)}`);
@@ -334,7 +367,13 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
       </div>
 
       {/* Shortfall Risk Detection & Prevention Card */}
-      <ShortfallRiskCard currentUser={currentUser} onNavigateToChat={onNavigateToChat} />
+      <ShortfallRiskCard 
+        currentUser={currentUser} 
+        transactions={safeTransactions} 
+        userConstants={userConstants} 
+        summaryData={summaryData} 
+        onNavigateToChat={onNavigateToChat} 
+      />
 
       {/* Main Grid: Forecast Chart (Left) + AI Guardian Account Protection Status (Right) */}
       <div style={{
@@ -465,7 +504,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
                   <div style={{ fontWeight: '700' }}>{displayedData[hoveredPoint].day} ({displayedData[hoveredPoint].date})</div>
                   <div>{displayedData[hoveredPoint].event}</div>
                   <div style={{ color: '#93C5FD', fontWeight: '600', marginTop: '2px' }}>
-                    Projected: ₹{displayedData[hoveredPoint].expected.toLocaleString()}
+                    Projected: ₹{(Number(displayedData[hoveredPoint]?.expected) || 0).toLocaleString()}
                   </div>
                 </div>
               )}

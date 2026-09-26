@@ -22,50 +22,157 @@ from backend.ai_agent.lc_tools import (
     get_category_spending_tool,
     get_timeframe_category_spend_tool,
     get_ledger_summary_tool,
-    get_savings_advice_tool
+    get_savings_advice_tool,
+    check_user_category_data,
+    CATEGORY_SYNONYMS
 )
 from backend.ai_agent.lc_memory import format_feedback_in_context_block
+import re
 
 
-def load_llm_model():
-    """Initializes primary LLM using ChatGoogleGenerativeAI (gemini-3.8-flash) or ChatGroq."""
+def load_llm_models_hierarchy() -> List[tuple[str, str, Any]]:
+    """
+    Returns ordered list of (provider, model_name, model_instance) for resilient failover execution.
+    Primary model and provider: gemini-3.8-flash and google
+    Fallback model and provider: openai/gpt-oss-120b and groq
+    """
+    candidates = []
+
+    # 1. Primary: gemini-3.8-flash (Google)
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-
     if gemini_key:
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
-            model = ChatGoogleGenerativeAI(
+            # max_retries=0 ensures that if Google quota is exhausted (HTTP 429), it fails immediately
+            # without hanging for 30-60s on backoff retries, allowing instant fallback to Groq.
+            model_gemini = ChatGoogleGenerativeAI(
                 model="gemini-3.8-flash",
                 google_api_key=gemini_key,
-                temperature=0.2
+                temperature=0.2,
+                max_retries=0
             )
-            return model, "gemini-3.8-flash (Google)"
+            candidates.append(("google", "gemini-3.8-flash (Google)", model_gemini))
         except Exception as e:
             print(f"[LangChain ChatGoogleGenerativeAI Warning] Failed to init gemini-3.8-flash: {e}")
 
-    has_groq = bool(os.getenv("GROQ_API_KEY"))
-    if has_groq:
+    # 2. Fallback: openai/gpt-oss-120b (Groq)
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key:
         try:
             from langchain_groq import ChatGroq
-            model = ChatGroq(
-                model="llama-3.3-70b-versatile",
-                groq_api_key=os.getenv("GROQ_API_KEY"),
-                temperature=0.2
+            # Fallback model requested by user: openai/gpt-oss-120b via Groq
+            model_groq = ChatGroq(
+                model="openai/gpt-oss-120b",
+                groq_api_key=groq_key,
+                temperature=0.2,
+                max_retries=2
             )
-            return model, "llama-3.3-70b-versatile (Groq)"
+            candidates.append(("groq", "openai/gpt-oss-120b (Groq)", model_groq))
         except Exception as e:
-            print(f"[LangChain ChatGroq Warning] Failed to init Groq: {e}")
+            print(f"[LangChain ChatGroq Warning] Failed to init Groq openai/gpt-oss-120b: {e}")
+
+    return candidates
+
+
+def load_llm_model():
+    """
+    Initializes primary LLM using ChatGoogleGenerativeAI (gemini-3.8-flash) or ChatGroq (openai/gpt-oss-120b).
+    Maintained for backward compatibility.
+    """
+    hierarchy = load_llm_models_hierarchy()
+    if hierarchy:
+        provider, name, model = hierarchy[0]
+        return model, name
 
     return None, "Deterministic Fallback Engine (Neon DB Grounded)"
+
+
+def evaluate_query_data_availability(query: str, user_id: str) -> tuple[bool, str]:
+    """
+    Evaluates whether real data is available in the database for the given user and query.
+    Returns:
+        (has_data: bool, direct_response: str)
+    If has_data is False, direct_response is "no data found" and AI MUST NOT be invoked.
+    """
+    q_lower = query.lower().strip()
+    
+    # Check for pure greetings that do not ask for financial data
+    clean_q = "".join(c for c in q_lower if c.isalnum() or c.isspace()).strip()
+    pure_greetings = {'hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'who are you', 'what are you', 'help'}
+    if clean_q in pure_greetings:
+        return True, ""
+
+    # Fetch user profile strictly from DB for this user_id
+    profile = fetch_user_financial_profile(user_id)
+    total_txns = profile["income_count"] + profile["expense_count"]
+
+    # 1. Check for specific category query
+    target_category = None
+    search_terms = []
+
+    for cat_name, syns in CATEGORY_SYNONYMS.items():
+        if any(s in q_lower for s in syns):
+            target_category = cat_name
+            search_terms = syns
+            break
+
+    if not target_category:
+        m = re.search(r'(?:spend|spent|spending|cost|expenses?|money\s+spent)(?:\s+(?:anything|money|much))?\s+(?:on|for)\s+([a-zA-Z0-9\s&]+?)(?:\?|\.|\bin\b|\bduring\b|\blast\b|\bthis\b|$)', q_lower)
+        if m:
+            extracted = m.group(1).strip()
+            if extracted and extracted not in ['me', 'it', 'this', 'that', 'something']:
+                target_category = extracted
+                search_terms = [extracted]
+
+    if target_category:
+        cat_check = check_user_category_data(user_id=user_id, search_terms=search_terms)
+        if not cat_check["has_data"] or cat_check["count"] == 0:
+            return False, "no data found"
+        return True, ""
+
+    # 2. Category breakdown queries
+    if any(k in q_lower for k in ['where', 'category', 'categories', 'most of my income', 'breakdown', 'spend breakdown']):
+        if profile["expense_count"] == 0:
+            return False, "no data found"
+        return True, ""
+
+    # 3. Overall overview, summary, statement, balance, safe to spend
+    if any(k in q_lower for k in ['overview', 'transactions', 'summary', 'statement', 'balance', 'safe-to-spend', 'safe to spend', 'safely spend', 'how much money']):
+        if not profile.get("has_data") or total_txns == 0:
+            return False, "no data found"
+        return True, ""
+
+    # 4. Affordability queries
+    if any(k in q_lower for k in ['afford', 'trip', 'buy', 'gift', 'purchase', 'can i']):
+        if not profile.get("has_data") or total_txns == 0:
+            return False, "no data found"
+        return True, ""
+
+    # 5. Savings advice
+    if any(k in q_lower for k in ['save', 'saving', 'reduce', 'cut', 'tips', 'budget']):
+        if profile["expense_count"] == 0:
+            return False, "no data found"
+        return True, ""
+
+    # 6. Any other general financial question when the user has 0 records in DB
+    financial_keywords = ['spend', 'spent', 'expense', 'income', 'balance', 'budget', 'money', 'cost', 'save', 'transaction', 'bill']
+    if any(k in q_lower for k in financial_keywords):
+        if not profile.get("has_data") or total_txns == 0:
+            return False, "no data found"
+
+    return True, ""
 
 
 def determine_tool_context(query: str, user_id: str) -> str:
     """Executes relevant LangChain pre-calculated metric tools based on user question intent."""
     q_lower = query.lower()
 
-    contexts = []
-    # Always include baseline financial profile
     profile = fetch_user_financial_profile(user_id)
+    if not profile.get("has_data") or (profile["income_count"] + profile["expense_count"]) == 0:
+        return "no data found"
+
+    contexts = []
+    # Always include baseline financial profile strictly from database
     contexts.append(
         f"[Ground Truth Baseline]: Net Balance: ₹{profile['net_balance']:,.2f} | "
         f"Safe-to-Spend: ₹{profile['safe_to_spend']:,.2f} | "
@@ -75,10 +182,8 @@ def determine_tool_context(query: str, user_id: str) -> str:
 
     # 1. Affordability / Trip / Purchase query
     if any(k in q_lower for k in ['afford', 'trip', 'buy', 'gift', 'spend safely', 'purchase', 'can i']):
-        # Extract possible amount from query (e.g. 4000, 1200)
-        import re
         nums = re.findall(r'\d+', q_lower.replace(',', ''))
-        amt = float(nums[0]) if nums else 4000.0
+        amt = float(nums[0]) if nums else 2000.0
         afford_res = check_affordability_tool.invoke({"user_id": user_id, "amount": amt, "category": "general"})
         safe_res = get_safe_to_spend_tool.invoke({"user_id": user_id})
         contexts.append(f"[Affordability Analysis for ₹{amt:,.2f}]:\n{afford_res}")
@@ -89,10 +194,16 @@ def determine_tool_context(query: str, user_id: str) -> str:
         cat_res = get_category_spending_tool.invoke({"user_id": user_id, "timeframe": "30d"})
         contexts.append(f"[Category Breakdown Analysis]:\n{cat_res}")
 
-    # 3. Specific category & timeframe (e.g., food in last week)
-    if 'food' in q_lower or 'canteen' in q_lower or 'swiggy' in q_lower:
-        food_res = get_timeframe_category_spend_tool.invoke({"user_id": user_id, "category": "food", "days": 7})
-        contexts.append(f"[Recent Food Expenses]:\n{food_res}")
+    # 3. Specific category & timeframe query
+    matched_cat = None
+    for cat_name, syns in CATEGORY_SYNONYMS.items():
+        if any(s in q_lower for s in syns):
+            matched_cat = cat_name
+            break
+
+    if matched_cat:
+        cat_spend_res = get_timeframe_category_spend_tool.invoke({"user_id": user_id, "category": matched_cat, "days": 30})
+        contexts.append(f"[Recent {matched_cat.capitalize()} Expenses]:\n{cat_spend_res}")
 
     # 4. Transaction Overview
     if any(k in q_lower for k in ['overview', 'transactions', 'summary', 'statement']):
@@ -108,64 +219,49 @@ def determine_tool_context(query: str, user_id: str) -> str:
 
 
 def create_deterministic_fallback_response(query: str, user_id: str = "usr-001") -> str:
-    """Deterministic, mathematically strict fallback response if LLM API is unavailable or times out."""
-    q_lower = query.lower()
+    """Strict data-driven fallback response. If no user data is available in database, outputs 'no data found'."""
+    is_avail, _ = evaluate_query_data_availability(query=query, user_id=user_id)
+    if not is_avail:
+        return "no data found"
+
     profile = fetch_user_financial_profile(user_id)
+    if not profile.get("has_data") or (profile["income_count"] + profile["expense_count"]) == 0:
+        return "no data found"
+
+    q_lower = query.lower()
     safe = profile['safe_to_spend']
     net = profile['net_balance']
 
-    if 'afford' in q_lower or 'trip' in q_lower or '4000' in q_lower:
+    # Specific category check
+    for cat_name, syns in CATEGORY_SYNONYMS.items():
+        if any(s in q_lower for s in syns):
+            cat_res = get_timeframe_category_spend_tool.invoke({"user_id": user_id, "category": cat_name, "days": 30})
+            return cat_res
+
+    if any(k in q_lower for k in ['where', 'category', 'most of my income', 'breakdown']):
+        cat_res = get_category_spending_tool.invoke({"user_id": user_id, "timeframe": "30d"})
+        if cat_res == "no data found":
+            return "no data found"
+        return f"Here is your real expense breakdown from the database:\n{cat_res}"
+
+    if any(k in q_lower for k in ['afford', 'trip', 'purchase', 'buy']):
+        nums = re.findall(r'\d+', q_lower.replace(',', ''))
+        amt = float(nums[0]) if nums else 2000.0
+        return check_affordability_tool.invoke({"user_id": user_id, "amount": amt, "category": "general"})
+
+    if any(k in q_lower for k in ['overview', 'transaction', 'summary']):
         return (
-            f"Based on your real-time cashflow from Neon PostgreSQL, spending **₹4,000** this weekend is **not recommended**.\n\n"
-            f"- **Current Safe-to-Spend Limit**: ₹{safe:,.2f}\n"
-            f"- **Net Balance**: ₹{net:,.2f}\n"
-            f"- **Impact**: Spending ₹4,000 exceeds your safe threshold by ₹{max(0.0, 4000 - safe):,.2f} right before your upcoming **₹2,500 Mess Fee** debit.\n"
-            f"- **Recommendation**: Limit discretionary trip spending to **₹2,000** or defer until your next income deposit."
+            f"Financial Overview for your account:\n\n"
+            f"- Total Income: ₹{profile['total_income']:,.2f} ({profile['income_count']} transactions)\n"
+            f"- Total Expenses: ₹{profile['total_expense']:,.2f} ({profile['expense_count']} transactions)\n"
+            f"- Net Balance: ₹{profile['net_balance']:,.2f}\n"
+            f"- Safe-to-Spend: ₹{profile['safe_to_spend']:,.2f}"
         )
-    elif 'where' in q_lower or 'most' in q_lower:
-        return (
-            "Your top spending category over the last 30 days is **Mess & Hostel Fees**, accounting for **38.2% (₹2,500.00)** of your total expenses.\n\n"
-            "**Category Breakdown**:\n"
-            "1. 🏠 **Mess & Hostel**: ₹2,500.00 (38.2%)\n"
-            "2. 💻 **Electronics / UPI Merchants**: ₹1,800.00 (27.5%)\n"
-            "3. 🍔 **Food & Canteen**: ₹1,250.00 (19.1%)\n"
-            "4. 📺 **Subscriptions**: ₹499.00 (7.6%)"
-        )
-    elif 'gift' in q_lower or 'birthday' in q_lower or 'spend safely' in q_lower:
-        return (
-            f"You can safely spend up to **₹2,450.00** on your friend's birthday gift today.\n\n"
-            f"- **Current Safe-to-Spend**: ₹{safe:,.2f}\n"
-            f"- **Recommended Discretionary Cushion**: ₹1,000.00 (reserved for daily canteen meals)\n"
-            f"- **Maximum Safe Gift Budget**: **₹2,450.00**"
-        )
-    elif 'food' in q_lower or 'week' in q_lower:
-        return (
-            "In the last 7 days, you spent **₹850.00** on **Food & Canteen** across 4 transactions:\n\n"
-            "- Swiggy Food Delivery: ₹350.00\n"
-            "- Campus Canteen: ₹150.00\n"
-            "- Canteen UPI: ₹200.00\n"
-            "- Swiggy Snack: ₹150.00"
-        )
-    elif 'overview' in q_lower or 'transaction' in q_lower:
-        return (
-            f"Here is your financial transaction overview from Neon PostgreSQL:\n\n"
-            f"- 📥 **Total Income**: ₹{profile['total_income']:,.2f} ({profile['income_count']} transactions)\n"
-            f"- 📤 **Total Expenses**: ₹{profile['total_expense']:,.2f} ({profile['expense_count']} transactions)\n"
-            f"- ⚖️ **Net Cashflow**: ₹{profile['net_balance']:,.2f}\n"
-            f"- 🛡️ **Safe-to-Spend**: ₹{profile['safe_to_spend']:,.2f}"
-        )
-    elif 'save' in q_lower:
-        return (
-            "Here are 3 personalized recommendations to save **₹1,200+/month**:\n\n"
-            "1. 📺 **Review Subscriptions**: Cancel unused streaming subscriptions to save **₹499/month**.\n"
-            "2. 🛵 **Optimize Food Orders**: Shift 2 Swiggy orders/week to campus canteen to save approx. **₹500/month**.\n"
-            "3. 🎯 **Automate Safety Buffer**: Reserve your ₹3,000 safety buffer on stipend deposit day."
-        )
-    else:
-        return (
-            f"Your current dynamic Safe-to-Spend limit is **₹{safe:,.2f}**, and your net account balance is **₹{net:,.2f}**. "
-            f"All protected bill commitments (₹{profile['total_protected']:,.2f}) are guarded against low-balance shortfalls."
-        )
+
+    return (
+        f"Based on your recorded transactions in the database, your current Safe-to-Spend limit is ₹{safe:,.2f} "
+        f"with a net balance of ₹{net:,.2f}."
+    )
 
 
 def build_langchain_chat_chain():
@@ -176,9 +272,10 @@ Your mission is to provide concise, empathetic, and 100% mathematically accurate
 
 CRITICAL FINANCIAL GROUNDING RULES:
 1. NEVER invent, hallucinate, or perform unsupported arithmetic. All financial balances, deficits, and category totals MUST come strictly from the [GROUND TRUTH CONTEXT] provided below.
-2. Maintain a friendly, supportive, and actionable tone (use bullet points and bold amounts for readability).
-3. Keep responses direct (under 150 words) with clear numbers and specific next steps.
-4. Adhere to [USER FEEDBACK PREFERENCES] when suggesting behavioral modifications.
+2. If the user asks about any category, expense, or transaction that does not appear in [GROUND TRUTH CONTEXT] or if the context says 'no data found', you MUST reply exactly 'no data found'. NEVER invent sample transactions, merchants (e.g. Swiggy, Canteen), or amounts.
+3. Maintain a friendly, supportive, and actionable tone (use bullet points and bold amounts for readability).
+4. Keep responses direct (under 150 words) with clear numbers and specific next steps.
+5. Adhere to [USER FEEDBACK PREFERENCES] when suggesting behavioral modifications.
 
 [USER FEEDBACK PREFERENCES]:
 {feedback_memory}

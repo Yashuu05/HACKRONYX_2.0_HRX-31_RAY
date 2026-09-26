@@ -46,10 +46,11 @@ export default function SignIn({ onNavigateSignUp, onLoginSuccess }) {
         console.warn('Backend sync skipped or offline, proceeding with Firebase session:', backendErr);
       }
 
-      const activeUser = backendUser || {
+      const activeUser = {
+        ...(backendUser || {}),
         id: firebaseUser.id,
         user_id: firebaseUser.id,
-        full_name: firebaseUser.full_name,
+        full_name: (backendUser && (backendUser.full_name || backendUser.name)) || firebaseUser.full_name || 'Google User',
         email: firebaseUser.email,
         photo_url: firebaseUser.photo_url
       };
@@ -85,8 +86,27 @@ export default function SignIn({ onNavigateSignUp, onLoginSuccess }) {
     const cleanEmail = email.trim();
     let authenticatedUser = null;
     let userToken = null;
+    let fbUser = null;
 
-    // 1. First, check backend authentication (allows all demo logins and backend users)
+    // 1. Try Firebase Authentication first so we obtain the exact Firebase UID
+    try {
+      const fbResult = await loginWithEmail(cleanEmail, password);
+      fbUser = fbResult.user;
+      if (fbUser) {
+        authenticatedUser = {
+          id: fbUser.id,
+          user_id: fbUser.id,
+          email: fbUser.email,
+          full_name: fbUser.full_name || fbUser.name || 'User',
+          photo_url: fbUser.photo_url || ''
+        };
+        userToken = `fb-token-${fbUser.id}`;
+      }
+    } catch (fbErr) {
+      console.warn('Firebase login attempt:', fbErr.message);
+    }
+
+    // 2. Check backend authentication (pass firebase_uid to sync Neon DB)
     try {
       const response = await fetch('http://localhost:8000/api/auth/login', {
         method: 'POST',
@@ -95,30 +115,26 @@ export default function SignIn({ onNavigateSignUp, onLoginSuccess }) {
         },
         body: JSON.stringify({
           email: cleanEmail,
-          password: password
+          password: password,
+          firebase_uid: fbUser ? fbUser.id : null
         })
       });
 
       if (response.ok) {
         const data = await response.json();
-        authenticatedUser = data.user;
-        userToken = data.access_token;
-        // Also sync credentials to Firebase Firestore
+        const bUser = data.user;
+        authenticatedUser = {
+          ...(bUser || {}),
+          id: fbUser ? fbUser.id : (bUser.user_id || bUser.id),
+          user_id: fbUser ? fbUser.id : (bUser.user_id || bUser.id),
+          full_name: bUser?.full_name || bUser?.name || fbUser?.full_name || 'User',
+          email: bUser?.email || cleanEmail
+        };
+        userToken = data.access_token || userToken;
         saveUserCredentialsToFirebase(authenticatedUser);
       }
     } catch (backendErr) {
       console.warn('Backend login check failed or unavailable:', backendErr);
-    }
-
-    // 2. If not found in backend mock, try Firebase Authentication
-    if (!authenticatedUser) {
-      try {
-        const { user: fbUser } = await loginWithEmail(cleanEmail, password);
-        authenticatedUser = fbUser;
-        userToken = `fb-token-${fbUser.id}`;
-      } catch (fbErr) {
-        console.warn('Firebase login attempt:', fbErr.message);
-      }
     }
 
     if (authenticatedUser) {

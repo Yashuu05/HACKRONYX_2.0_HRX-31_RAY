@@ -4,13 +4,164 @@ import {
   Calendar, DollarSign, Wallet, ShieldCheck, Zap, CreditCard, ShoppingBag, Utensils
 } from 'lucide-react';
 
-export default function AnalyticsView({ currentUser }) {
-  const userId = currentUser?.user_id || currentUser?.id || 'usr-001';
+// Helper to compute analytics client-side from real Neon DB transactions prop
+function computeAnalyticsFromTxns(txns, timeframe, granularity) {
+  if (!txns || txns.length === 0) {
+    return {
+      summary: {
+        total_income: 0,
+        total_expense: 0,
+        net_saved: 0,
+        spending_ratio: 0,
+        savings_rate: 0,
+        avg_daily_spend: 0
+      },
+      expense_categories: [],
+      income_categories: [],
+      timeseries: [],
+      top_merchants: [],
+      dow_pattern: [
+        { day: 'Mon', amount: 0, count: 0 },
+        { day: 'Tue', amount: 0, count: 0 },
+        { day: 'Wed', amount: 0, count: 0 },
+        { day: 'Thu', amount: 0, count: 0 },
+        { day: 'Fri', amount: 0, count: 0 },
+        { day: 'Sat', amount: 0, count: 0 },
+        { day: 'Sun', amount: 0, count: 0 }
+      ]
+    };
+  }
+
+  const now = new Date();
+  let cutoff = null;
+  if (timeframe === '7d') cutoff = new Date(now.getTime() - 7 * 86400000);
+  else if (timeframe === '30d') cutoff = new Date(now.getTime() - 30 * 86400000);
+  else if (timeframe === '90d') cutoff = new Date(now.getTime() - 90 * 86400000);
+  else if (timeframe === '180d') cutoff = new Date(now.getTime() - 180 * 86400000);
+
+  const filtered = txns.filter(t => {
+    if (!cutoff) return true;
+    const d = new Date(t.transaction_date || t.date);
+    return isNaN(d.getTime()) || d >= cutoff;
+  });
+
+  let total_income = 0;
+  let total_expense = 0;
+  const expenseMap = {};
+  const incomeMap = {};
+  const merchantMap = {};
+  const dowMap = {
+    'Mon': { amount: 0, count: 0 },
+    'Tue': { amount: 0, count: 0 },
+    'Wed': { amount: 0, count: 0 },
+    'Thu': { amount: 0, count: 0 },
+    'Fri': { amount: 0, count: 0 },
+    'Sat': { amount: 0, count: 0 },
+    'Sun': { amount: 0, count: 0 }
+  };
+  const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  for (const t of filtered) {
+    const act = (t.activity_type || '').toLowerCase();
+    const amt = Math.abs(parseFloat(t.amount) || 0);
+    const cat = t.category || 'Other';
+    const desc = t.description || cat;
+
+    if (act === 'income') {
+      total_income += amt;
+      if (!incomeMap[cat]) incomeMap[cat] = { amount: 0, count: 0 };
+      incomeMap[cat].amount += amt;
+      incomeMap[cat].count += 1;
+    } else {
+      total_expense += amt;
+      if (!expenseMap[cat]) expenseMap[cat] = { amount: 0, count: 0 };
+      expenseMap[cat].amount += amt;
+      expenseMap[cat].count += 1;
+
+      if (!merchantMap[desc]) merchantMap[desc] = { name: desc, category: cat, amount: 0, count: 0 };
+      merchantMap[desc].amount += amt;
+      merchantMap[desc].count += 1;
+
+      const d = new Date(t.transaction_date || t.date);
+      if (!isNaN(d.getTime())) {
+        const dowName = dowNames[d.getDay()];
+        if (dowMap[dowName]) {
+          dowMap[dowName].amount += amt;
+          dowMap[dowName].count += 1;
+        }
+      }
+    }
+  }
+
+  const net_saved = total_income - total_expense;
+  const spending_ratio = total_income > 0 ? (total_expense / total_income) * 100 : 0;
+  const savings_rate = total_income > 0 ? (net_saved / total_income) * 100 : 0;
+  const days = timeframe === '7d' ? 7 : (timeframe === '30d' ? 30 : (timeframe === '90d' ? 90 : (timeframe === '180d' ? 180 : 30)));
+  const avg_daily_spend = total_expense / days;
+
+  const expense_categories = Object.entries(expenseMap).map(([category, val]) => ({
+    category,
+    amount: Math.round(val.amount * 100) / 100,
+    count: val.count,
+    percentage: total_expense > 0 ? Math.round((val.amount / total_expense) * 1000) / 10 : 0
+  })).sort((a, b) => b.amount - a.amount);
+
+  const income_categories = Object.entries(incomeMap).map(([category, val]) => ({
+    category,
+    amount: Math.round(val.amount * 100) / 100,
+    count: val.count,
+    percentage: total_income > 0 ? Math.round((val.amount / total_income) * 1000) / 10 : 0
+  })).sort((a, b) => b.amount - a.amount);
+
+  const top_merchants = Object.values(merchantMap)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+
+  const dow_order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const dow_pattern = dow_order.map(day => ({
+    day,
+    amount: Math.round(dowMap[day].amount * 100) / 100,
+    count: dowMap[day].count
+  }));
+
+  const timeseries = [
+    {
+      period: granularity === 'weekly' ? 'Current Period' : 'Month Total',
+      income: Math.round(total_income * 100) / 100,
+      expense: Math.round(total_expense * 100) / 100,
+      net: Math.round(net_saved * 100) / 100
+    }
+  ];
+
+  return {
+    summary: {
+      total_income: Math.round(total_income * 100) / 100,
+      total_expense: Math.round(total_expense * 100) / 100,
+      net_saved: Math.round(net_saved * 100) / 100,
+      spending_ratio: Math.round(spending_ratio * 10) / 10,
+      savings_rate: Math.round(savings_rate * 10) / 10,
+      avg_daily_spend: Math.round(avg_daily_spend * 100) / 100
+    },
+    expense_categories,
+    income_categories,
+    timeseries,
+    top_merchants,
+    dow_pattern
+  };
+}
+
+export default function AnalyticsView({ currentUser, transactions = [] }) {
+  const userId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [timeframe, setTimeframe] = useState('30d'); // '7d' | '30d' | '90d' | '180d' | 'all'
   const [granularity, setGranularity] = useState('weekly'); // 'weekly' | 'monthly'
-  const [analyticsData, setAnalyticsData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [serverData, setServerData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Compute instantaneous real-time analytics strictly from real transactions
+  const clientComputed = React.useMemo(() => {
+    return computeAnalyticsFromTxns(transactions, timeframe, granularity);
+  }, [transactions, timeframe, granularity]);
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -23,63 +174,25 @@ export default function AnalyticsView({ currentUser }) {
       }
       const data = await response.json();
       if (data.status === 'success') {
-        setAnalyticsData(data);
+        setServerData(data);
       } else {
         throw new Error(data.message || 'Failed to fetch analytics');
       }
     } catch (err) {
-      console.warn('Analytics fetch error, using local computation fallback:', err);
-      setError(err.message);
-      
-      // Fallback fallback mock structure if DB backend fails connection
-      setAnalyticsData({
-        summary: {
-          total_income: 6000,
-          total_expense: 6549,
-          net_saved: -549,
-          spending_ratio: 109.2,
-          savings_rate: -9.2,
-          avg_daily_spend: 218.3
-        },
-        expense_categories: [
-          { category: 'Mess & Hostel', amount: 2500, count: 1, percentage: 38.2 },
-          { category: 'UPI Merchant', amount: 2300, count: 3, percentage: 35.1 },
-          { category: 'Food & Canteen', amount: 1250, count: 6, percentage: 19.1 },
-          { category: 'Subscriptions', amount: 499, count: 1, percentage: 7.6 }
-        ],
-        income_categories: [
-          { category: 'Family Transfer', amount: 4000, count: 1, percentage: 66.7 },
-          { category: 'Stipend / Salary', amount: 2000, count: 1, percentage: 33.3 }
-        ],
-        timeseries: [
-          { period: 'W1', income: 4000, expense: 2150, net: 1850 },
-          { period: 'W2', income: 0, expense: 1800, net: -1800 },
-          { period: 'W3', income: 2000, expense: 2599, net: -599 }
-        ],
-        top_merchants: [
-          { name: 'Mess & Hostel Fee Debit', category: 'Mess & Hostel', amount: 2500, count: 1 },
-          { name: 'Laptop Screen Repair', category: 'UPI Merchant', amount: 1800, count: 1 },
-          { name: 'Swiggy Food Delivery', category: 'Food & Canteen', amount: 850, count: 3 },
-          { name: 'Netflix Subscription', category: 'Subscriptions', amount: 499, count: 1 }
-        ],
-        dow_pattern: [
-          { day: 'Mon', amount: 2500, count: 1 },
-          { day: 'Tue', amount: 450, count: 2 },
-          { day: 'Wed', amount: 1800, count: 1 },
-          { day: 'Thu', amount: 350, count: 1 },
-          { day: 'Fri', amount: 650, count: 2 },
-          { day: 'Sat', amount: 499, count: 1 },
-          { day: 'Sun', amount: 300, count: 1 }
-        ]
-      });
+      console.warn('Analytics API fetch note: using client-computed real transaction metrics:', err);
+      setError(null); // Non-blocking because real transaction data is already displayed
     } finally {
       setLoading(false);
     }
   };
 
+  // Re-fetch and re-compute whenever timeframe, granularity, user, or transactions change
   useEffect(() => {
     fetchAnalytics();
-  }, [timeframe, granularity, userId]);
+  }, [timeframe, granularity, userId, transactions]);
+
+  // Use server data if available, otherwise instantaneous clientComputed from real transactions
+  const analyticsData = serverData || clientComputed;
 
   const summary = analyticsData?.summary || {
     total_income: 0, total_expense: 0, net_saved: 0, spending_ratio: 0, savings_rate: 0, avg_daily_spend: 0

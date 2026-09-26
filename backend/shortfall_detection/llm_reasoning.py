@@ -41,16 +41,34 @@ class LLMShortfallReasoner:
         return configs
 
     def create_model_instance(self, model_name: str, provider: str):
-        provider_map = {
-            "google": "google_genai",
-        }
-        actual_provider = provider_map.get(provider.lower(), provider)
-        model = init_chat_model(
-            model=model_name,
-            model_provider=actual_provider,
-            temperature=0.3
-        )
-        return model
+        prov = provider.lower().strip()
+        if prov in ["google", "google_genai"]:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            return ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=gemini_key,
+                temperature=0.3,
+                max_retries=0,
+                request_timeout=3
+            )
+        elif prov == "groq":
+            from langchain_groq import ChatGroq
+            return ChatGroq(
+                model=model_name,
+                groq_api_key=os.getenv("GROQ_API_KEY"),
+                temperature=0.3,
+                max_retries=1,
+                request_timeout=6
+            )
+        else:
+            # Fallback for open-source / local models
+            model = init_chat_model(
+                model=model_name,
+                model_provider=prov,
+                temperature=0.3
+            )
+            return model
 
     def generate_llm_reasoning(self, shortfall_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -102,7 +120,7 @@ class LLMShortfallReasoner:
                         res_dict["ai_model_used"] = f"{m_name} ({m_provider})"
                         return res_dict
                 except Exception as struct_err:
-                    print(f"Structured output attempt failed for {m_name}: {struct_err}")
+                    print(f"Structured output attempt note for {m_name}: {struct_err}")
 
                 # String invocation fallback
                 response = model.invoke([system_prompt, user_message])
@@ -117,7 +135,7 @@ class LLMShortfallReasoner:
                     }
 
             except Exception as err:
-                print(f"[LLM Shortfall Reasoner] Model {m_name} ({m_provider}) failed: {err}")
+                print(f"[LLM Shortfall Reasoner] Model {m_name} ({m_provider}) failed: {err}. Proceeding to fallback candidate.")
                 continue
 
         return None

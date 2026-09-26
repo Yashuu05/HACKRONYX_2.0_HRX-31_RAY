@@ -6,6 +6,7 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   updateProfile,
+  onAuthStateChanged,
   signOut 
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc } from 'firebase/firestore';
@@ -112,6 +113,25 @@ export async function logoutUser() {
   } catch (error) {
     console.warn('[Firebase] Sign out error:', error);
   }
+}
+
+/**
+ * Listen to Firebase Auth state changes
+ */
+export function onAuthStateChange(callback) {
+  return onAuthStateChanged(auth, (user) => {
+    if (user) {
+      callback({
+        id: user.uid,
+        user_id: user.uid,
+        full_name: user.displayName || user.email?.split('@')[0] || 'User',
+        email: user.email,
+        photo_url: user.photoURL || ''
+      });
+    } else {
+      callback(null);
+    }
+  });
 }
 
 /**

@@ -3,6 +3,7 @@ import sys
 import json
 import asyncio
 import uuid
+import re
 from typing import AsyncGenerator, Dict, Any, List
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,9 +17,11 @@ from backend.ai_agent.lc_memory import (
 )
 from backend.ai_agent.lc_chains import (
     load_llm_model,
+    load_llm_models_hierarchy,
     determine_tool_context,
     build_langchain_chat_chain,
-    create_deterministic_fallback_response
+    create_deterministic_fallback_response,
+    evaluate_query_data_availability
 )
 
 
@@ -32,6 +35,10 @@ async def stream_ai_chat_response(
     Yields JSON event chunks for real-time frontend consumption.
     After streaming completes, saves the full conversation turn to the
     Neon PostgreSQL `ai_chat` table as specified in data_model.md.
+
+    CRITICAL RULES:
+    1. Data must be fetched from the database of the same user.
+    2. If data is not available, the system bypasses AI completely and directly outputs 'no data found'.
     """
     trace_id = f"TR-LC-{uuid.uuid4().hex[:6].upper()}"
     raw_history = conversation_history or []
@@ -45,74 +52,122 @@ async def stream_ai_chat_response(
     yield f"data: {json.dumps(start_payload)}\n\n"
     await asyncio.sleep(0.01)
 
-    # 2. Compute LangChain context and memory in sub-15ms
-    tool_context = determine_tool_context(query=query, user_id=user_id)
-    feedback_memory = format_feedback_in_context_block(user_id=user_id)
-    chat_history_messages = build_conversation_messages(raw_history)
+    full_response_text = ""
+    model_identifier = "Direct Database Validation (AI Bypassed)"
 
-    # 3. Attempt LangChain Model streaming
-    model, model_identifier = load_llm_model()
-    stream_succeeded = False
-    full_response_text = ""  # Accumulate complete AI response for DB persistence
+    # 2. Strict Pre-LLM Data Availability Assessment
+    # User constraint: "If data is not available, The system should not use AI and directly output 'no data found' instead of using hardcoded fallback mechanism."
+    is_data_available, direct_resp = evaluate_query_data_availability(query=query, user_id=user_id)
+    if not is_data_available:
+        full_response_text = direct_resp or "no data found"
+        token_payload = {
+            "event": "token",
+            "token": full_response_text,
+            "trace_id": trace_id,
+            "is_direct": True
+        }
+        yield f"data: {json.dumps(token_payload)}\n\n"
+        await asyncio.sleep(0.01)
+    else:
+        # 3. Compute LangChain context and memory in sub-15ms
+        tool_context = determine_tool_context(query=query, user_id=user_id)
 
-    if model:
-        try:
-            prompt_template = build_langchain_chat_chain()
-            chain = prompt_template | model
-
-            # Stream chunks as they arrive; accumulate into full_response_text
-            async for chunk in chain.astream({
-                "feedback_memory": feedback_memory,
-                "tool_context": tool_context,
-                "chat_history": chat_history_messages,
-                "user_input": query
-            }):
-                text_content = ""
-                if hasattr(chunk, 'content'):
-                    content = chunk.content
-                    if isinstance(content, str):
-                        text_content = content
-                    elif isinstance(content, list):
-                        for part in content:
-                            if isinstance(part, dict) and "text" in part:
-                                text_content += part["text"]
-                            elif isinstance(part, str):
-                                text_content += part
-                    else:
-                        text_content = str(content)
-                else:
-                    text_content = str(chunk)
-
-                if text_content:
-                    full_response_text += text_content
-                    token_payload = {
-                        "event": "token",
-                        "token": text_content,
-                        "trace_id": trace_id
-                    }
-                    yield f"data: {json.dumps(token_payload)}\n\n"
-                    stream_succeeded = True
-                    await asyncio.sleep(0.01)
-
-        except Exception as llm_err:
-            print(f"[LangChain Streaming Exception] {llm_err}. Switching to Circuit-Breaker Fallback.")
-            stream_succeeded = False
-
-    # 4. Fallback Circuit-Breaker Execution if model failed or was unavailable
-    if not stream_succeeded:
-        fallback_text = create_deterministic_fallback_response(query=query, user_id=user_id)
-        full_response_text = fallback_text
-        words = fallback_text.split(" ")
-        for i, word in enumerate(words):
-            chunk_text = word + (" " if i < len(words) - 1 else "")
+        if tool_context == "no data found":
+            # Extra guard: if tool evaluation yielded no data, bypass AI directly
+            full_response_text = "no data found"
             token_payload = {
                 "event": "token",
-                "token": chunk_text,
+                "token": full_response_text,
                 "trace_id": trace_id,
-                "is_fallback": True
+                "is_direct": True
             }
             yield f"data: {json.dumps(token_payload)}\n\n"
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.01)
+        else:
+            feedback_memory = format_feedback_in_context_block(user_id=user_id)
+            chat_history_messages = build_conversation_messages(raw_history)
+
+            # 4. Attempt LangChain Model streaming with Seamless Fallback Hierarchy
+            # Primary: gemini-3.8-flash (Google)
+            # Fallback: openai/gpt-oss-120b (Groq)
+            model_candidates = load_llm_models_hierarchy()
+            stream_succeeded = False
+            model_identifier = "Deterministic Fallback Engine (Neon DB Grounded)"
+
+            for provider, model_name, model_inst in model_candidates:
+                if not model_inst:
+                    continue
+                try:
+                    prompt_template = build_langchain_chat_chain()
+                    chain = prompt_template | model_inst
+                    stream_for_candidate = False
+
+                    # Stream chunks as they arrive; accumulate into full_response_text
+                    async for chunk in chain.astream({
+                        "feedback_memory": feedback_memory,
+                        "tool_context": tool_context,
+                        "chat_history": chat_history_messages,
+                        "user_input": query
+                    }):
+                        text_content = ""
+                        if hasattr(chunk, 'content'):
+                            content = chunk.content
+                            if isinstance(content, str):
+                                text_content = content
+                            elif isinstance(content, list):
+                                for part in content:
+                                    if isinstance(part, dict) and "text" in part:
+                                        text_content += part["text"]
+                                    elif isinstance(part, str):
+                                        text_content += part
+                            else:
+                                text_content = str(content)
+                        else:
+                            text_content = str(chunk)
+
+                        if text_content:
+                            full_response_text += text_content
+                            token_payload = {
+                                "event": "token",
+                                "token": text_content,
+                                "trace_id": trace_id
+                            }
+                            yield f"data: {json.dumps(token_payload)}\n\n"
+                            stream_for_candidate = True
+                            await asyncio.sleep(0.005)
+
+                    if stream_for_candidate:
+                        stream_succeeded = True
+                        model_identifier = model_name
+                        print(f"[AI Agent Stream Success] Delivered streaming response via {model_name}")
+                        break
+
+                except Exception as llm_err:
+                    err_msg = str(llm_err)
+                    print(f"[{model_name} Failed/Exhausted] {err_msg[:160]}... Switching to fallback provider.")
+                    # If this model failed after yielding some tokens, break to avoid duplicated partial sentences
+                    if stream_for_candidate:
+                        stream_succeeded = True
+                        model_identifier = model_name
+                        break
+
+            # 5. Deterministic Circuit-Breaker Fallback if all AI models failed or were unavailable
+            if not stream_succeeded:
+                print("[AI Agent Fallback] All LLM providers exhausted or unavailable. Triggering deterministic DB fallback.")
+                fallback_text = create_deterministic_fallback_response(query=query, user_id=user_id)
+                full_response_text = fallback_text
+                model_identifier = "Deterministic Fallback Engine (Neon DB Grounded)"
+                words = fallback_text.split(" ")
+                for i, word in enumerate(words):
+                    chunk_text = word + (" " if i < len(words) - 1 else "")
+                    token_payload = {
+                        "event": "token",
+                        "token": chunk_text,
+                        "trace_id": trace_id,
+                        "is_fallback": True
+                    }
+                    yield f"data: {json.dumps(token_payload)}\n\n"
+                    await asyncio.sleep(0.02)
 
     # 5. Persist the completed conversation turn to Neon PostgreSQL ai_chat table
     #    Schema: chat_id (UUID PK), user_id (FK), user_query (TEXT),
@@ -120,8 +175,6 @@ async def stream_ai_chat_response(
     saved_chat_id = None
     if full_response_text.strip():
         try:
-            import re
-
             # Extract safe_to_spend numeric value from AI response (if present)
             safe_to_spend_val = None
             sts_patterns = [

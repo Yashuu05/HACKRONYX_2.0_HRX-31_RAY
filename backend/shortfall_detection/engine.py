@@ -77,16 +77,22 @@ def calculate_shortfall_trajectory(
                 "horizon_days": horizon_days,
                 "has_enough_data": False,
                 "current_balance": 0.0,
+                "net_balance": 0.0,
                 "safety_buffer": safety_buffer,
                 "weekly_budget": budget_week,
                 "monthly_budget": budget_month,
-                "daily_burn_rate": 0.0,
+                "daily_burn_baseline": daily_burn_baseline,
+                "daily_burn_rate": daily_burn_baseline,
                 "is_shortfall_predicted": False,
+                "shortfall_detected": False,
                 "risk_score": 0.0,
+                "shortfall_risk_score": 0.0,
                 "risk_level": "SAFE",
                 "days_until_shortfall": None,
+                "days_to_shortfall": None,
                 "shortfall_date": None,
                 "max_shortfall_deficit": 0.0,
+                "max_deficit": 0.0,
                 "trajectory": []
             }
 
@@ -110,6 +116,7 @@ def calculate_shortfall_trajectory(
         
         # Calculate daily discretionary velocity (over 30-day baseline)
         actual_daily_burn = round(discretionary_total / 30.0, 2)
+        effective_daily_burn = actual_daily_burn if actual_daily_burn > 0 else daily_burn_baseline
 
         # 4. Fetch future scheduled transactions within horizon
         cur.execute(
@@ -155,7 +162,7 @@ def calculate_shortfall_trajectory(
 
         # Initial check: if current starting balance is already below safety buffer
         if current_balance < safety_buffer:
-            first_shortfall_day = 1
+            first_shortfall_day = 0  # 0 indicates Immediate shortfall today
             first_shortfall_date = today.isoformat()
             max_shortfall_depth = round(safety_buffer - current_balance, 2)
 
@@ -175,9 +182,9 @@ def calculate_shortfall_trajectory(
                     else:
                         day_expense += amt
 
-            # Add actual daily burn rate if no specific scheduled expense is set for this day
+            # Add effective daily burn rate if no specific scheduled expense is set for this day
             if day_expense == 0.0:
-                day_expense = actual_daily_burn
+                day_expense = effective_daily_burn
 
             # Net day change
             net_day_change = day_income - day_expense
@@ -213,33 +220,44 @@ def calculate_shortfall_trajectory(
             risk_level = "SAFE"
         else:
             # Depth severity score (max 50 points)
-            depth_score = (max_shortfall_depth / (safety_buffer + 1.0)) * 50.0
+            depth_score = min(50.0, (max_shortfall_depth / (safety_buffer + 1.0)) * 50.0)
             # Proximity urgency score (max 50 points)
-            urgency_score = max(0.0, (15 - (first_shortfall_day or 1))) * 3.5
+            if first_shortfall_day == 0:
+                urgency_score = 50.0
+            else:
+                urgency_score = max(0.0, (15 - first_shortfall_day)) * 3.5
             
             raw_score = depth_score + urgency_score
-            risk_score = round(min(100.0, max(15.0, raw_score)), 1)
+            risk_score = round(min(100.0, max(25.0, raw_score)), 1)
 
-            if risk_score >= 60.0:
+            if risk_score >= 60.0 or first_shortfall_day == 0:
                 risk_level = "CRITICAL"
-            else:
+            elif risk_score >= 35.0:
                 risk_level = "MODERATE"
+            else:
+                risk_level = "LOW"
 
         return {
             "user_id": user_id,
             "horizon_days": horizon_days,
             "has_enough_data": True,
             "current_balance": current_balance,
+            "net_balance": current_balance,
             "safety_buffer": safety_buffer,
             "weekly_budget": budget_week,
             "monthly_budget": budget_month,
-            "daily_burn_rate": actual_daily_burn,
+            "daily_burn_baseline": daily_burn_baseline,
+            "daily_burn_rate": effective_daily_burn,
             "is_shortfall_predicted": is_shortfall_predicted,
+            "shortfall_detected": is_shortfall_predicted,
             "risk_score": risk_score,
+            "shortfall_risk_score": risk_score,
             "risk_level": risk_level,
             "days_until_shortfall": first_shortfall_day,
+            "days_to_shortfall": first_shortfall_day,
             "shortfall_date": first_shortfall_date,
             "max_shortfall_deficit": max_shortfall_depth,
+            "max_deficit": max_shortfall_depth,
             "trajectory": trajectory
         }
 
