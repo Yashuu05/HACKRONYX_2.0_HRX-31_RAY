@@ -227,5 +227,6 @@ __marimo__/
 __pycache__
 node_modules
 !docs/backend-api.yaml
-firebase.js
-firebase_setup.js
+!src/firebase.js
+/firebase_setup.js
+serviceAccountKey.json
