@@ -28,8 +28,9 @@ def parse_narration(narration_str: str) -> Dict[str, str]:
         return {"payment_method": "NA", "merchant": "NA", "description": "NA"}
 
     if len(parts) == 1:
+        method = "UPI" if "UPI" in parts[0].upper() else ("DEBIT" if "DEBIT" in parts[0].upper() else ("ACH" if "ACH" in parts[0].upper() else "NA"))
         return {
-            "payment_method": "UPI" if "UPI" in parts[0].upper() else "NA",
+            "payment_method": method,
             "merchant": parts[0],
             "description": parts[0]
         }
@@ -50,18 +51,59 @@ def parse_narration(narration_str: str) -> Dict[str, str]:
         }
 
 
-def parse_date_to_iso(date_val: Any) -> str:
-    """Standardizes date strings (DD/MM/YY, DD/MM/YYYY, YYYY-MM-DD) into ISO YYYY-MM-DD."""
-    if pd.isna(date_val) or not str(date_val).strip():
-        return datetime.date.today().isoformat()
-    
-    d_str = str(date_val).strip()
-    for fmt in ("%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
-        try:
-            return datetime.datetime.strptime(d_str, fmt).strftime("%Y-%m-%d")
-        except ValueError:
+def parse_date_to_iso(date_val: Any, fallback_val: Any = None) -> str:
+    """
+    Standardizes date strings (DD/MM/YY, DD/MM/YYYY, YYYY-MM-DD, etc.) or datetime objects into ISO YYYY-MM-DD.
+    If date_val is masked (e.g. '#######' due to Excel column overflow) or invalid, falls back to fallback_val.
+    """
+    for v in (date_val, fallback_val):
+        if pd.isna(v):
             continue
+        if isinstance(v, (datetime.datetime, datetime.date, pd.Timestamp)):
+            return v.strftime("%Y-%m-%d")
+        
+        s = str(v).strip()
+        if not s or "###" in s or s.lower() in ["nan", "none", "null", "-", "na"]:
+            continue
+            
+        for fmt in (
+            "%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", 
+            "%d/%m/%Y %H:%M:%S", "%d-%b-%Y", "%d-%b-%y", "%d-%B-%Y"
+        ):
+            try:
+                return datetime.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
     return datetime.date.today().isoformat()
+
+
+def clean_float(val: Any) -> float:
+    """Converts formatted string/numeric amounts with commas, currency symbols to a clean float."""
+    if pd.isna(val):
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val) if not pd.isna(val) else 0.0
+    
+    s = str(val).strip().replace(",", "").replace("₹", "").replace("$", "")
+    if not s or s == "-" or s.lower() in ["nan", "none", "null", "na"]:
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def clean_ref_no(raw_ref: Any) -> str:
+    """Cleans reference number strings, removing scientific notation trailing decimals."""
+    if pd.isna(raw_ref):
+        return "NA"
+    s = str(raw_ref).strip()
+    if not s or s.lower() in ["nan", "none", "null", "-", "0", "0.0"]:
+        return "NA"
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
 
 
 def infer_category(description: str, merchant: str, activity_type: str) -> str:
@@ -73,67 +115,104 @@ def infer_category(description: str, merchant: str, activity_type: str) -> str:
             return "Salary & Income"
         elif any(k in text for k in ["FREELANCE", "CLIENT"]):
             return "Freelance"
-        elif any(k in text for k in ["REFUND", "CASHBACK"]):
-            return "Refunds"
+        elif any(k in text for k in ["DIV", "DIVIDEND", "INTEREST", "REFUND", "CASHBACK"]):
+            return "Investment & Refunds"
         return "General Income"
     else:
-        if any(k in text for k in ["EGG", "EGGS", "SWIGGY", "ZOMATO", "FOOD", "CANTEEN", "TEA", "HOTEL", "RESTAURANT", "MESS"]):
-            return "Food & Beverages"
-        elif any(k in text for k in ["AMAZON", "FLIPKART", "MYNTRA", "SHOP", "STORE", "PAYTMQR"]):
+        if any(k in text for k in ["EGG", "EGGS", "SWIGGY", "ZOMATO", "FOOD", "CANTEEN", "TEA", "HOTEL", "RESTAURANT", "MESS", "BAKER", "DAHI", "MILK", "PEETH", "POTATOES"]):
+            return "Food & Groceries"
+        elif any(k in text for k in ["AMAZON", "FLIPKART", "MYNTRA", "SHOP", "STORE", "PAYTMQR", "FOOTWEAR"]):
             return "Shopping"
-        elif any(k in text for k in ["RECHARGE", "ELECTRICITY", "BILL", "RENT", "WIFI"]):
-            return "Utilities & Bills"
-        elif any(k in text for k in ["FEES", "COLLEGE", "BOOK", "XEROX", "ACADEMIC"]):
+        elif any(k in text for k in ["RECHARGE", "ELECTRICITY", "BILL", "RENT", "WIFI", "MSEDCL", "HOTSTAR", "JIOHOTSTAR"]):
+            return "Utilities & Subscriptions"
+        elif any(k in text for k in ["FEES", "COLLEGE", "BOOK", "XEROX", "ACADEMIC", "SINHGAD", "UDEMY", "COURSE"]):
             return "Academic & Education"
-        elif any(k in text for k in ["AUTO", "UBER", "OLA", "METRO", "FUEL", "PETROL"]):
+        elif any(k in text for k in ["AUTO", "UBER", "OLA", "METRO", "FUEL", "PETROL", "TRANSPORT"]):
             return "Transportation"
+        elif any(k in text for k in ["ZERODHA", "UPSTOX", "NSE", "CDSL", "SECURITY", "INVEST"]):
+            return "Investments & Trading"
+        elif any(k in text for k in ["MEDICAL", "PHARMACY", "HOSPITAL", "CLINIC", "HEALTH", "ORS"]):
+            return "Healthcare"
+        elif any(k in text for k in ["HAIRCUT", "SALON", "STYLE", "TURF"]):
+            return "Personal Care & Recreation"
         return "Personal Expenses"
+
+
+def _find_header_row_csv(lines: List[str]) -> int:
+    """Finds the 0-indexed line where actual table column headers appear in a bank CSV."""
+    for idx, line in enumerate(lines[:40]):
+        line_lower = line.lower()
+        has_date = "date" in line_lower
+        has_narration = any(k in line_lower for k in ["narration", "particulars", "description", "details"])
+        has_amount = any(k in line_lower for k in ["withdrawal", "deposit", "debit", "credit", "amount"])
+        
+        if (has_date and has_narration) or (has_date and has_amount) or (has_narration and has_amount):
+            return idx
+    return 0
 
 
 def clean_and_parse_csv(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Parses and cleans raw bank dataset file (.csv or .xlsx).
-    Handles exact dataset columns:
-      - Date
-      - Narration
-      - Chq./Ref.No.
-      - Value Dt
-      - Withdrawal Amt.
-      - Deposit Amt.
-      - Closing Balance
-
-    Performs:
-      1. Null filling with "NA" / "NAN"
-      2. Narration hyphen splitting
-      3. Composite key deduplication
+    Parses and cleans raw bank dataset file (.csv, .xlsx, .xls).
+    Robustly handles:
+      - Bank statement metadata preambles & customer header rows
+      - Column overflow / masked dates ('#######') with fallback to Value Dt
+      - Formatted amounts with commas ('1,100.00')
+      - Scientific notation ref numbers ('1.24227E+11')
+      - Footer summary rows ('STATEMENT SUMMARY :-', 'Opening Balance', etc.)
+      - Hyphen-delimited narration parsing & rule-based auto-categorization
+      - Composite key deduplication
     """
-    # 1. Read file into Pandas DataFrame
     is_excel = filename.lower().endswith(".xlsx") or filename.lower().endswith(".xls")
     
     if is_excel:
         excel_stream = io.BytesIO(file_bytes)
-        if filename.lower().endswith(".xls"):
+        engine = "xlrd" if filename.lower().endswith(".xls") else "openpyxl"
+        try:
+            df_raw = pd.read_excel(excel_stream, header=None, engine=engine)
+        except Exception:
+            excel_stream.seek(0)
             try:
-                df = pd.read_excel(excel_stream, engine="xlrd")
+                df_raw = pd.read_excel(excel_stream, header=None)
             except Exception:
                 excel_stream.seek(0)
-                try:
-                    df = pd.read_excel(excel_stream, engine="openpyxl")
-                except Exception:
-                    excel_stream.seek(0)
-                    df = pd.read_excel(excel_stream)
-        else:
-            try:
-                df = pd.read_excel(excel_stream, engine="openpyxl")
-            except Exception:
-                excel_stream.seek(0)
-                try:
-                    df = pd.read_excel(excel_stream, engine="xlrd")
-                except Exception:
-                    excel_stream.seek(0)
-                    df = pd.read_excel(excel_stream)
+                df_raw = pd.read_excel(excel_stream, header=None, engine="openpyxl" if engine == "xlrd" else "xlrd")
+
+        # Dynamically find table header row
+        header_row_idx = 0
+        for idx, row in df_raw.head(40).iterrows():
+            row_str = " ".join([str(v).lower() for v in row.dropna()])
+            has_date = "date" in row_str
+            has_narration = any(k in row_str for k in ["narration", "particulars", "description", "details"])
+            has_amount = any(k in row_str for k in ["withdrawal", "deposit", "debit", "credit", "amount"])
+            if (has_date and has_narration) or (has_date and has_amount) or (has_narration and has_amount):
+                header_row_idx = idx
+                break
+
+        df = df_raw.iloc[header_row_idx + 1:].copy().reset_index(drop=True)
+        df.columns = [str(c).strip() for c in df_raw.iloc[header_row_idx]]
     else:
-        df = pd.read_csv(io.BytesIO(file_bytes))
+        # Decode CSV content handling various encodings
+        decoded_text = None
+        for enc in ("utf-8", "latin-1", "cp1252", "utf-8-sig"):
+            try:
+                decoded_text = file_bytes.decode(enc)
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        
+        if decoded_text is None:
+            decoded_text = file_bytes.decode("utf-8", errors="ignore")
+
+        lines = decoded_text.splitlines()
+        header_idx = _find_header_row_csv(lines)
+        csv_body = "\n".join(lines[header_idx:])
+        
+        # Read CSV with fallback for variable delimiters
+        try:
+            df = pd.read_csv(io.StringIO(csv_body), on_bad_lines="skip")
+        except Exception:
+            df = pd.read_csv(io.StringIO(csv_body), sep=None, engine="python", on_bad_lines="skip")
 
     total_rows_read = len(df)
 
@@ -144,49 +223,44 @@ def clean_and_parse_csv(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str
     col_map = {}
     for col in df.columns:
         c_lower = col.lower()
-        if "narration" in c_lower or "description" in c_lower or "particulars" in c_lower:
+        if any(k in c_lower for k in ["narration", "particulars", "description", "details"]):
             col_map["narration"] = col
-        elif "withdrawal" in c_lower or "debit" in c_lower:
+        elif any(k in c_lower for k in ["withdrawal", "debit", "dr"]):
             col_map["withdrawal"] = col
-        elif "deposit" in c_lower or "credit" in c_lower:
+        elif any(k in c_lower for k in ["deposit", "credit", "cr"]):
             col_map["deposit"] = col
-        elif c_lower == "date" or "txn date" in c_lower:
-            col_map["date"] = col
         elif "value" in c_lower and "dt" in c_lower:
             col_map["value_dt"] = col
+        elif "txn date" in c_lower or "tran date" in c_lower or c_lower == "date":
+            col_map["date"] = col
         elif "closing" in c_lower or "balance" in c_lower:
             col_map["closing_balance"] = col
-        elif "chq" in c_lower or "ref" in c_lower:
+        elif any(k in c_lower for k in ["chq", "ref", "cheque", "utr"]):
             col_map["ref_no"] = col
+
+    summary_keywords = [
+        "statement summary", "opening balance", "closing balance", 
+        "end of statement", "gstin", "dr count", "cr count", 
+        "generated on", "registered office", "page no"
+    ]
 
     cleaned_transactions = []
     nulls_filled_count = 0
 
     for idx, row in df.iterrows():
-        # Read Date
-        raw_date = row.get(col_map.get("date", "Date"))
-        tx_date = parse_date_to_iso(raw_date)
-
-        raw_value_dt = row.get(col_map.get("value_dt", "Value Dt"))
-        val_date = parse_date_to_iso(raw_value_dt)
-
-        # Read Narration & Parse
         raw_narration = row.get(col_map.get("narration", "Narration"))
-        parsed_narration = parse_narration(raw_narration)
+        narration_str = str(raw_narration).strip() if not pd.isna(raw_narration) else ""
         
-        if pd.isna(raw_narration) or not str(raw_narration).strip():
-            nulls_filled_count += 1
-
-        # Read Ref No
-        raw_ref = row.get(col_map.get("ref_no", "Chq./Ref.No."))
-        ref_no = str(raw_ref).strip() if not pd.isna(raw_ref) and str(raw_ref).strip() else "NA"
+        # Filter out bank footer summaries or non-transaction metadata lines
+        if any(kw in narration_str.lower() for kw in summary_keywords):
+            continue
 
         # Read Withdrawal & Deposit Amounts
         raw_wdr = row.get(col_map.get("withdrawal", "Withdrawal Amt."))
         raw_dep = row.get(col_map.get("deposit", "Deposit Amt."))
 
-        wdr_val = float(raw_wdr) if not pd.isna(raw_wdr) and str(raw_wdr).strip() != "" else 0.0
-        dep_val = float(raw_dep) if not pd.isna(raw_dep) and str(raw_dep).strip() != "" else 0.0
+        wdr_val = clean_float(raw_wdr)
+        dep_val = clean_float(raw_dep)
 
         if wdr_val > 0:
             activity_type = "expense"
@@ -195,12 +269,28 @@ def clean_and_parse_csv(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str
             activity_type = "income"
             amount = round(dep_val, 2)
         else:
-            # Skip rows with no financial movement or invalid 0 amounts
+            # Skip rows with no financial movement (preamble leftover or summary text)
             continue
+
+        # Read Dates with masked value fallback
+        raw_date = row.get(col_map.get("date", "Date"))
+        raw_value_dt = row.get(col_map.get("value_dt", "Value Dt"))
+
+        tx_date = parse_date_to_iso(raw_date, fallback_val=raw_value_dt)
+        val_date = parse_date_to_iso(raw_value_dt, fallback_val=raw_date)
+
+        # Parse Narration
+        parsed_narration = parse_narration(raw_narration)
+        if pd.isna(raw_narration) or not narration_str:
+            nulls_filled_count += 1
+
+        # Read Ref No
+        raw_ref = row.get(col_map.get("ref_no", "Chq./Ref.No."))
+        ref_no = clean_ref_no(raw_ref)
 
         # Closing balance
         raw_bal = row.get(col_map.get("closing_balance", "Closing Balance"))
-        closing_bal = float(raw_bal) if not pd.isna(raw_bal) and str(raw_bal).strip() != "" else "NAN"
+        closing_bal = clean_float(raw_bal) if not pd.isna(raw_bal) and str(raw_bal).strip() != "" else "NAN"
 
         # Category
         category = infer_category(parsed_narration["description"], parsed_narration["merchant"], activity_type)
@@ -224,9 +314,9 @@ def clean_and_parse_csv(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str
     df_clean = pd.DataFrame(cleaned_transactions)
     if not df_clean.empty:
         initial_clean_count = len(df_clean)
-        # Composite key: transaction_date, amount, description, activity_type
+        # Composite key: transaction_date, amount, description, activity_type, ref_no
         df_dedup = df_clean.drop_duplicates(
-            subset=["transaction_date", "amount", "description", "activity_type"],
+            subset=["transaction_date", "amount", "description", "activity_type", "ref_no"],
             keep="first"
         )
         duplicates_removed = initial_clean_count - len(df_dedup)
@@ -244,3 +334,4 @@ def clean_and_parse_csv(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str
     }
 
     return final_records, summary
+

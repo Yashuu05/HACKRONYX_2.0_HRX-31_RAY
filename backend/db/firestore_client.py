@@ -41,11 +41,12 @@ def get_firestore_client():
                 cred = credentials.Certificate(cred_path)
                 firebase_admin.initialize_app(cred)
             else:
-                print("[FirestoreClient] Initializing Firebase App with default project credentials (cashflow-guardian-main)...")
-                firebase_admin.initialize_app(options={'projectId': 'cashflow-guardian-main'})
+                print("[FirestoreClient] WARNING: 'serviceAccountKey.json' not found. Operating in MOCK MEMORY mode.")
+                print("[FirestoreClient] To enable live Firestore storage, download serviceAccountKey.json from Firebase Console -> Project Settings -> Service Accounts.")
+                return None
         
         _db_instance = firestore.client()
-        print("[FirestoreClient] Firestore client initialized successfully.")
+        print("[FirestoreClient] Firestore client initialized successfully for live storage!")
         return _db_instance
     except Exception as err:
         print(f"[FirestoreClient] Error initializing Firestore client: {err}")
@@ -82,6 +83,7 @@ def save_transactions_to_firestore(user_id: str, transactions: List[Dict[str, An
         for tx in transactions:
             doc_id = tx.get("transaction_id") or f"tx-{uuid.uuid4().hex[:12]}"
             doc_ref = collection_ref.document(doc_id)
+            now_iso = datetime.datetime.utcnow().isoformat()
             
             tx_data = {
                 "transaction_id": doc_id,
@@ -96,11 +98,15 @@ def save_transactions_to_firestore(user_id: str, transactions: List[Dict[str, An
                 "closing_balance": float(tx.get("closing_balance", 0.0)) if tx.get("closing_balance") not in [None, "NA", "NAN"] else None,
                 "transaction_date": str(tx.get("transaction_date", datetime.date.today().isoformat())),
                 "value_date": str(tx.get("value_date", tx.get("transaction_date", datetime.date.today().isoformat()))),
-                "created_at": firestore.SERVER_TIMESTAMP if FIREBASE_AVAILABLE else datetime.datetime.utcnow().isoformat()
+                "created_at": firestore.SERVER_TIMESTAMP if FIREBASE_AVAILABLE else now_iso
             }
 
             batch.set(doc_ref, tx_data)
-            inserted_records.append(tx_data)
+            
+            # Use serializable copy for API return dictionary
+            tx_serializable = dict(tx_data)
+            tx_serializable["created_at"] = now_iso
+            inserted_records.append(tx_serializable)
             count += 1
 
             # Firestore batch limit is 500 documents
