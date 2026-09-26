@@ -20,6 +20,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState('landing'); // 'landing' | 'signup' | 'signin' | 'dashboard'
   const [currentUser, setCurrentUser] = useState(null);
   const [authToken, setAuthToken] = useState(null);
+  const [dashboardInitialTab, setDashboardInitialTab] = useState('overview');
 
   const handleAuthSuccess = (user, token) => {
     setCurrentUser(user);
@@ -34,15 +35,15 @@ export default function App() {
     setCurrentView('landing');
   };
 
-  const openDashboard = () => {
+  const openDashboard = (tab = 'overview') => {
     if (!currentUser) {
-      // Default to demo user if not logged in
       setCurrentUser({
         id: 'usr-001',
         full_name: 'Riya Sharma',
         email: 'riya@college.edu.in'
       });
     }
+    setDashboardInitialTab(tab);
     setCurrentView('dashboard');
   };
 
@@ -50,9 +51,7 @@ export default function App() {
     setCurrentView('landing');
     setTimeout(() => {
       const el = document.getElementById('demo-scenario');
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth' });
-      }
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
     }, 100);
   };
 
@@ -61,6 +60,7 @@ export default function App() {
       <Dashboard
         currentUser={currentUser || { full_name: 'Riya Sharma', email: 'riya@college.edu.in' }}
         onLogout={handleLogout}
+        initialTab={dashboardInitialTab}
       />
     );
   }
@@ -74,12 +74,13 @@ export default function App() {
         onNavigateSignUp={() => setCurrentView('signup')}
         currentUser={currentUser}
         onLogout={handleLogout}
+        onNavigateMatrix={() => openDashboard('matrix')}
       />
 
       <main style={{ flex: 1 }}>
         {currentView === 'landing' && (
           <>
-            <Hero onExploreClick={openDashboard} />
+            <Hero onExploreClick={() => openDashboard('overview')} />
             <SafeToSpendVisualizer />
             <IntelligenceLoop />
             <DemoScenarioTimeline />
@@ -106,7 +107,7 @@ export default function App() {
         )}
       </main>
 
-      <FooterCta onLaunchDashboard={openDashboard} />
+      <FooterCta onLaunchDashboard={() => openDashboard('overview')} />
     </div>
   );
 }

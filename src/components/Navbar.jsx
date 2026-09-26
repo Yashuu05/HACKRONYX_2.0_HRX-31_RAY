@@ -1,7 +1,7 @@
 import React from 'react';
 import { ShieldCheck, LogIn, UserPlus, LogOut, User } from 'lucide-react';
 
-export default function Navbar({ onNavigateHome, onNavigateSignIn, onNavigateSignUp, currentUser, onLogout, currentView }) {
+export default function Navbar({ onNavigateHome, onNavigateSignIn, onNavigateSignUp, currentUser, onLogout, currentView, onNavigateMatrix }) {
   const scrollToSection = (id) => {
     if (currentView !== 'landing') {
       if (onNavigateHome) onNavigateHome();
@@ -76,6 +76,17 @@ export default function Navbar({ onNavigateHome, onNavigateSignIn, onNavigateSig
           </button>
           <button onClick={() => scrollToSection('judge-sandbox')} style={{ background: 'none', border: 'none', color: 'var(--brand-blue)', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}>
             For Judges
+          </button>
+          <button
+            onClick={onNavigateMatrix}
+            style={{
+              background: 'linear-gradient(135deg, #2563EB, #7C3AED)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              border: 'none', fontWeight: '800', fontSize: '14px', cursor: 'pointer',
+              padding: '4px 0',
+            }}
+          >
+            Matrix Explanation
           </button>
         </nav>
 

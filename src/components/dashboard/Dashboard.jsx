@@ -1,47 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import DashboardNavbar from './DashboardNavbar';
+import DashboardSidebar from './DashboardNavbar';
 import DashboardOverview from './DashboardOverview';
 import AnalyticsView from './AnalyticsView';
 import TransactionsView from './TransactionsView';
 import AIChatWidget from './AIChatWidget';
 import SettingsView from './SettingsView';
 import AddTransactionModal from './AddTransactionModal';
+import MatrixExplanation from './MatrixExplanation';
 import { saveUserCredentialsToFirebase } from '../../firebase';
 
-export default function Dashboard({ currentUser, onLogout }) {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'analytics' | 'transactions' | 'ai-chat' | 'settings'
+export default function Dashboard({ currentUser, onLogout, initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [chatInitialQuery, setChatInitialQuery] = useState('');
+  const [sidebarWidth, setSidebarWidth] = useState(240);
 
   const handleNavigateToChat = (queryText) => {
-    if (queryText) {
-      setChatInitialQuery(queryText);
-    }
+    if (queryText) setChatInitialQuery(queryText);
     setActiveTab('ai-chat');
   };
 
   const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
   const [transactions, setTransactions] = useState([]);
 
-  // Sync user credentials with Firebase & Neon DB & fetch live transactions
   const fetchLiveTransactions = async () => {
     try {
       const response = await fetch(`http://localhost:8000/api/transactions?user_id=${encodeURIComponent(activeUserId)}`);
       if (response.ok) {
         const data = await response.json();
-        if (data.status === 'success') {
-          setTransactions(data.transactions || []);
-        }
+        if (data.status === 'success') setTransactions(data.transactions || []);
       }
     } catch (err) {
-      console.warn('Could not fetch live transactions in Dashboard parent component:', err);
+      console.warn('Could not fetch live transactions:', err);
     }
   };
 
   useEffect(() => {
     if (currentUser) {
       saveUserCredentialsToFirebase(currentUser);
-      // Ensure user exists in Neon DB users table
       fetch('http://localhost:8000/api/users/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,21 +52,35 @@ export default function Dashboard({ currentUser, onLogout }) {
 
   const handleAddTransaction = (newTx) => {
     setTransactions((prev) => [newTx, ...prev]);
-    // Refresh live list from Neon DB
     setTimeout(fetchLiveTransactions, 500);
   };
 
+  // Track collapsed state for sidebar offset (240 expanded, 72 collapsed)
+  // We pass a callback down to sidebar to track width changes
+  const [collapsed, setCollapsed] = useState(false);
+  const contentOffset = collapsed ? '72px' : '240px';
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-canvas)', display: 'flex', flexDirection: 'column' }}>
-      <DashboardNavbar
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-canvas)', display: 'flex' }}>
+      {/* Sidebar — fixed position, takes no flow space */}
+      <DashboardSidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenAddModal={() => setIsAddModalOpen(true)}
         currentUser={currentUser}
         onLogout={onLogout}
+        onCollapseChange={setCollapsed}
       />
 
-      <main className="container" style={{ flex: 1, padding: '32px 24px 60px 24px' }}>
+      {/* Main content area — offset by sidebar width */}
+      <main style={{
+        flex: 1,
+        marginLeft: contentOffset,
+        minHeight: '100vh',
+        transition: 'margin-left 0.25s cubic-bezier(0.4,0,0.2,1)',
+        padding: activeTab === 'matrix' ? '0' : '32px 28px 60px 28px',
+        backgroundColor: 'var(--bg-canvas)',
+      }}>
         {activeTab === 'overview' && (
           <DashboardOverview
             currentUser={currentUser}
@@ -79,11 +89,9 @@ export default function Dashboard({ currentUser, onLogout }) {
             onNavigateToChat={handleNavigateToChat}
           />
         )}
-
         {activeTab === 'analytics' && (
           <AnalyticsView currentUser={currentUser} transactions={transactions} />
         )}
-
         {activeTab === 'transactions' && (
           <TransactionsView
             currentUser={currentUser}
@@ -91,11 +99,12 @@ export default function Dashboard({ currentUser, onLogout }) {
             onOpenAddModal={() => setIsAddModalOpen(true)}
           />
         )}
-
         {activeTab === 'ai-chat' && (
           <AIChatWidget initialQuery={chatInitialQuery} currentUser={currentUser} />
         )}
-
+        {activeTab === 'matrix' && (
+          <MatrixExplanation />
+        )}
         {activeTab === 'settings' && (
           <SettingsView currentUser={currentUser} onLogout={onLogout} />
         )}
