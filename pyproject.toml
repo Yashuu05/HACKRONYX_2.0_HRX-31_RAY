@@ -20,3 +20,14 @@ dependencies = [
     "python-multipart>=0.0.32",
     "xlrd>=2.0.1",
 ]
+
+[tool.pyright]
+include = ["main.py", "backend", "db"]
+exclude = ["src", "node_modules", "dist", ".venv"]
+extraPaths = ["."]
+venvPath = "."
+venv = ".venv"
+executionEnvironments = [
+    { root = "." }
+]
+

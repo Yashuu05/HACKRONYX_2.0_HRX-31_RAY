@@ -1,0 +1,23 @@
+{
+  "include": [
+    "main.py",
+    "backend",
+    "db"
+  ],
+  "exclude": [
+    "src",
+    "node_modules",
+    "dist",
+    ".venv"
+  ],
+  "extraPaths": [
+    "."
+  ],
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ],
+  "venvPath": ".",
+  "venv": ".venv"
+}
