@@ -27,8 +27,8 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
     <aside style={{
       width: sidebarWidth,
       minHeight: '100vh',
-      backgroundColor: '#0F172A',
-      borderRight: '1px solid rgba(255,255,255,0.06)',
+      backgroundColor: '#FFFFFF',
+      borderRight: '1px solid #E2E8F0',
       display: 'flex',
       flexDirection: 'column',
       position: 'fixed',
@@ -37,11 +37,12 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
       zIndex: 200,
       transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
       overflow: 'hidden',
+      boxShadow: '2px 0 12px rgba(0,0,0,0.03)'
     }}>
       {/* Brand */}
       <div style={{
         padding: collapsed ? '20px 0' : '20px 20px',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid #F1F5F9',
         display: 'flex',
         alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
@@ -51,18 +52,18 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
           <div style={{
             width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
-            background: 'linear-gradient(135deg, #2563EB, #7C3AED)',
+            background: 'linear-gradient(135deg, #2563EB, #1D4ED8)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(37,99,235,0.4)',
+            boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
           }}>
             <ShieldCheck size={20} color="#FFFFFF" strokeWidth={2.4} />
           </div>
           {!collapsed && (
             <div style={{ overflow: 'hidden' }}>
-              <div style={{ fontSize: '15px', fontWeight: '800', color: '#FFFFFF', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
+              <div style={{ fontSize: '15px', fontWeight: '800', color: '#0F172A', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
                 Cashflow Guardian
               </div>
-              <div style={{ fontSize: '10px', fontWeight: '600', color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 Dashboard
               </div>
             </div>
@@ -72,9 +73,9 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
           onClick={handleToggleCollapse}
           style={{
             width: '28px', height: '28px', borderRadius: '8px', flexShrink: 0,
-            border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)',
+            border: '1px solid #E2E8F0', background: '#F8FAFC',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: '#64748B', transition: 'all 0.15s',
+            cursor: 'pointer', color: '#475569', transition: 'all 0.15s',
           }}
         >
           {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
@@ -93,7 +94,7 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
             cursor: 'pointer', display: 'flex', alignItems: 'center',
             justifyContent: collapsed ? 'center' : 'flex-start',
             gap: '8px', transition: 'all 0.15s',
-            boxShadow: '0 4px 12px rgba(37,99,235,0.35)',
+            boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
             fontFamily: 'inherit',
           }}
         >
@@ -102,14 +103,14 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
         </button>
       </div>
 
-      {/* Nav Section */}
+      {/* Nav Section Header */}
       {!collapsed && (
-        <div style={{ padding: '8px 16px 4px', fontSize: '10px', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+        <div style={{ padding: '8px 16px 4px', fontSize: '10px', fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           Navigation
         </div>
       )}
 
-      <nav style={{ flex: 1, padding: collapsed ? '4px 8px' : '4px 10px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+      <nav style={{ flex: 1, padding: collapsed ? '4px 8px' : '4px 10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -122,10 +123,10 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
                 width: '100%',
                 padding: collapsed ? '11px' : '11px 14px',
                 borderRadius: '10px',
-                border: isActive ? '1px solid rgba(37,99,235,0.4)' : '1px solid transparent',
-                backgroundColor: isActive ? 'rgba(37,99,235,0.15)' : 'transparent',
-                color: isActive ? '#60A5FA' : '#64748B',
-                fontWeight: isActive ? '700' : '500',
+                border: isActive ? '1px solid #BFDBFE' : '1px solid transparent',
+                backgroundColor: isActive ? '#EFF6FF' : 'transparent',
+                color: isActive ? '#2563EB' : '#475569',
+                fontWeight: isActive ? '700' : '600',
                 fontSize: '14px',
                 cursor: 'pointer',
                 display: 'flex',
@@ -145,7 +146,7 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
                   backgroundColor: '#2563EB',
                 }} />
               )}
-              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
+              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} color={isActive ? '#2563EB' : '#64748B'} />
               {!collapsed && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tab.label}</span>}
             </button>
           );
@@ -153,7 +154,7 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
       </nav>
 
       {/* Bottom: Settings + User */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: collapsed ? '12px 8px' : '12px 10px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+      <div style={{ borderTop: '1px solid #F1F5F9', padding: collapsed ? '12px 8px' : '12px 10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {/* Settings */}
         <button
           onClick={() => setActiveTab('settings')}
@@ -162,10 +163,10 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
             width: '100%',
             padding: collapsed ? '11px' : '11px 14px',
             borderRadius: '10px',
-            border: activeTab === 'settings' ? '1px solid rgba(37,99,235,0.4)' : '1px solid transparent',
-            backgroundColor: activeTab === 'settings' ? 'rgba(37,99,235,0.15)' : 'transparent',
-            color: activeTab === 'settings' ? '#60A5FA' : '#64748B',
-            fontWeight: activeTab === 'settings' ? '700' : '500',
+            border: activeTab === 'settings' ? '1px solid #BFDBFE' : '1px solid transparent',
+            backgroundColor: activeTab === 'settings' ? '#EFF6FF' : 'transparent',
+            color: activeTab === 'settings' ? '#2563EB' : '#475569',
+            fontWeight: activeTab === 'settings' ? '700' : '600',
             fontSize: '14px',
             cursor: 'pointer',
             display: 'flex',
@@ -176,20 +177,23 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
             fontFamily: 'inherit',
           }}
         >
-          <Settings size={18} />
+          <Settings size={18} color={activeTab === 'settings' ? '#2563EB' : '#64748B'} />
           {!collapsed && <span>Settings</span>}
         </button>
 
-        {/* User */}
+        {/* User Profile */}
         <div style={{
           display: 'flex', alignItems: 'center',
-          gap: '10px', padding: collapsed ? '8px' : '10px 14px',
+          gap: '10px', padding: collapsed ? '8px' : '10px 12px',
           marginTop: '4px',
+          borderRadius: '12px',
+          backgroundColor: '#F8FAFC',
+          border: '1px solid #F1F5F9',
           justifyContent: collapsed ? 'center' : 'flex-start',
         }}>
           <div style={{
             width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
-            background: 'linear-gradient(135deg, #2563EB, #7C3AED)',
+            background: 'linear-gradient(135deg, #2563EB, #1D4ED8)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#FFFFFF', fontWeight: '800', fontSize: '13px',
           }}>
@@ -198,10 +202,10 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
           {!collapsed && (
             <>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '13px', fontWeight: '700', color: '#CBD5E1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {currentUser?.full_name || 'User'}
                 </div>
-                <div style={{ fontSize: '11px', color: '#475569', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: '11px', color: '#64748B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {currentUser?.email || ''}
                 </div>
               </div>
@@ -210,7 +214,7 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
                 title="Sign Out"
                 style={{
                   width: '30px', height: '30px', borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid #E2E8F0', background: '#FFFFFF',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: '#64748B', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s',
                 }}

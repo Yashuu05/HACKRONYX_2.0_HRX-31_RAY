@@ -256,7 +256,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', height: 'calc(100vh - 160px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(100vh - 90px)', maxHeight: 'calc(100vh - 90px)', width: '100%', boxSizing: 'border-box' }}>
       {/* Header */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
@@ -302,7 +302,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
                   📦 DB Persisted
                 </span>
               </div>
-              <p className="body-sm" style={{ color: 'var(--text-secondary)' }}>
+              <p className="body-sm" style={{ color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
                 Conversations saved to Neon PostgreSQL · Real-time streaming · Feedback learning
               </p>
             </div>
@@ -338,13 +338,14 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
       <div className="card" style={{
         backgroundColor: '#FFFFFF',
         borderRadius: '20px',
-        padding: '24px',
+        padding: '20px',
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
         boxShadow: 'var(--shadow-md)',
         border: '1px solid var(--border-color)',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        minHeight: 0
       }}>
         {/* Messages Stream */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', paddingRight: '8px' }}>

@@ -78,8 +78,9 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
         marginLeft: contentOffset,
         minHeight: '100vh',
         transition: 'margin-left 0.25s cubic-bezier(0.4,0,0.2,1)',
-        padding: activeTab === 'matrix' ? '0' : '32px 28px 60px 28px',
+        padding: activeTab === 'matrix' ? '0' : (activeTab === 'ai-chat' ? '20px 24px 20px 24px' : '32px 28px 60px 28px'),
         backgroundColor: 'var(--bg-canvas)',
+        boxSizing: 'border-box'
       }}>
         {activeTab === 'overview' && (
           <DashboardOverview
