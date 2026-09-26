@@ -111,7 +111,27 @@ def clean_and_parse_csv(file_bytes: bytes, filename: str) -> Tuple[List[Dict[str
     is_excel = filename.lower().endswith(".xlsx") or filename.lower().endswith(".xls")
     
     if is_excel:
-        df = pd.read_excel(io.BytesIO(file_bytes))
+        excel_stream = io.BytesIO(file_bytes)
+        if filename.lower().endswith(".xls"):
+            try:
+                df = pd.read_excel(excel_stream, engine="xlrd")
+            except Exception:
+                excel_stream.seek(0)
+                try:
+                    df = pd.read_excel(excel_stream, engine="openpyxl")
+                except Exception:
+                    excel_stream.seek(0)
+                    df = pd.read_excel(excel_stream)
+        else:
+            try:
+                df = pd.read_excel(excel_stream, engine="openpyxl")
+            except Exception:
+                excel_stream.seek(0)
+                try:
+                    df = pd.read_excel(excel_stream, engine="xlrd")
+                except Exception:
+                    excel_stream.seek(0)
+                    df = pd.read_excel(excel_stream)
     else:
         df = pd.read_csv(io.BytesIO(file_bytes))
 

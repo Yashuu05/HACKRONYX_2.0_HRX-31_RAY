@@ -59,7 +59,36 @@ def test_csv_cleaning_and_ingestion():
     print(f"Inserted Count : {db_res['inserted_count']}")
     print("-> Test 3 PASSED!\n")
 
+
+def test_excel_ingestion():
+    print("=== TEST 4: Excel (.xlsx) Engine Ingestion ===")
+    import pandas as pd
+    import io
+
+    data = {
+        "Date": ["05/06/26"],
+        "Narration": ["UPI-ANITA MADHUKAR SHIND-PAYTMQR70W1DZ@PTYS-YESB0PTMUPI-124226945456-EGGS"],
+        "Chq./Ref.No.": ["00000000000"],
+        "Value Dt": ["05/06/26"],
+        "Withdrawal Amt.": [42.0],
+        "Deposit Amt.": [None],
+        "Closing Balance": [16369.27]
+    }
+    df = pd.DataFrame(data)
+    excel_buf = io.BytesIO()
+    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    
+    records, summary = clean_and_parse_csv(excel_buf.getvalue(), "test_statement.xlsx")
+    print(f"Excel Rows Read     : {summary['total_rows_read']}")
+    print(f"Excel Final Records : {summary['final_records_count']}")
+    assert summary['final_records_count'] == 1
+    print("-> Test 4 PASSED!\n")
+
+
 if __name__ == "__main__":
     test_narration_parser()
     test_csv_cleaning_and_ingestion()
+    test_excel_ingestion()
     print("ALL TESTS COMPLETED SUCCESSFULLY!")
+

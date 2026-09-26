@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, PlusCircle, ArrowRight, Sparkles, MessageSquare, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { X, PlusCircle, ArrowRight, Sparkles, MessageSquare, CheckCircle, AlertCircle, RefreshCw, UploadCloud, FileSpreadsheet, FileText, Database } from 'lucide-react';
 
 const EXPENSE_CATEGORIES = [
   'Food & Beverages',
@@ -41,7 +41,7 @@ const PAYMENT_METHODS = [
 export default function AddTransactionModal({ isOpen, onClose, onAddTransaction, currentUser }) {
   const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
 
-  // Modal Mode: 'form' | 'natural_language'
+  // Modal Mode: 'form' | 'natural_language' | 'file_upload'
   const [entryMode, setEntryMode] = useState('form');
 
   // Form Mode State
@@ -56,6 +56,12 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
   const [nlText, setNlText] = useState('');
   const [nlDate, setNlDate] = useState(new Date().toISOString().split('T')[0]);
   const [isParsing, setIsParsing] = useState(false);
+
+  // File Upload Mode State
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSummary, setUploadSummary] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Status Notification State
   const [feedbackStatus, setFeedbackStatus] = useState(null); // { type: 'success' | 'error', message: string, details?: object }
@@ -77,13 +83,48 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
     setCategory(type === 'income' ? 'Salary' : 'Food & Beverages');
     setPaymentMethod('UPI');
     setNlText('');
+    setSelectedFile(null);
+    setUploadSummary(null);
     setFeedbackStatus(null);
     setIsParsing(false);
+    setIsUploading(false);
   };
 
   const handleCloseModal = () => {
     resetState();
     onClose();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.xlsx') && !file.name.toLowerCase().endsWith('.xls')) {
+        setFeedbackStatus({
+          type: 'error',
+          message: 'Invalid file type. Please select a .csv or .xlsx bank statement file.'
+        });
+        return;
+      }
+      setSelectedFile(file);
+      setFeedbackStatus(null);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (!file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.xlsx') && !file.name.toLowerCase().endsWith('.xls')) {
+        setFeedbackStatus({
+          type: 'error',
+          message: 'Invalid file type. Please select a .csv or .xlsx file.'
+        });
+        return;
+      }
+      setSelectedFile(file);
+      setFeedbackStatus(null);
+    }
   };
 
   // 1. Submit Form Mode
@@ -179,7 +220,6 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
       const data = await response.json();
       if (data.status === 'success') {
         const createdTx = data.transaction;
-        const parsedRes = data.parsed_result || {};
 
         onAddTransaction({
           id: createdTx.transaction_id,
@@ -219,6 +259,74 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
     }
   };
 
+  // 3. Submit File Upload Mode (Ingestion Pipeline)
+  const handleFileUploadSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedFile) return;
+
+    setIsUploading(true);
+    setFeedbackStatus(null);
+    setUploadSummary(null);
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('user_id', activeUserId);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/transactions/upload-csv', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Dataset ingestion failed.');
+      }
+
+      const data = await response.json();
+      if (data.status === 'success' || data.status === 'warning') {
+        const summary = data.summary || {};
+        const sampleRecords = data.sample_cleaned_records || [];
+
+        setUploadSummary(summary);
+        setFeedbackStatus({
+          type: 'success',
+          message: data.message || 'Dataset uploaded, cleaned, and ingested into Firestore NoSQL DB!'
+        });
+
+        // Update frontend state with ingested records
+        if (sampleRecords.length > 0) {
+          sampleRecords.forEach((rec, idx) => {
+            onAddTransaction({
+              id: rec.transaction_id || `tx-csv-${Date.now()}-${idx}`,
+              description: rec.description || rec.merchant || 'Uploaded Transaction',
+              amount: rec.amount,
+              type: rec.activity_type,
+              category: rec.category,
+              date: rec.transaction_date,
+              time: '12:00:00',
+              status: rec.status || 'Completed'
+            });
+          });
+        }
+
+        setTimeout(() => {
+          handleCloseModal();
+        }, 2200);
+      } else {
+        throw new Error(data.message || 'CSV Ingestion failed.');
+      }
+    } catch (err) {
+      console.error('Dataset Upload Error:', err);
+      setFeedbackStatus({
+        type: 'error',
+        message: `Ingestion failed: ${err.message}`
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const samplePrompts = [
     "spent INR 500 pizza cash",
     "spent INR 350 on meal via UPI",
@@ -244,7 +352,7 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
         backgroundColor: '#FFFFFF',
         borderRadius: '24px',
         padding: '32px',
-        maxWidth: '520px',
+        maxWidth: '560px',
         width: '92%',
         position: 'relative',
         boxShadow: 'var(--shadow-xl)',
@@ -273,26 +381,26 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
               width: '38px',
               height: '38px',
               borderRadius: '12px',
-              backgroundColor: entryMode === 'natural_language' ? '#EEF2FF' : 'var(--safe-green-light)',
-              color: entryMode === 'natural_language' ? 'var(--brand-blue)' : 'var(--safe-green)',
+              backgroundColor: entryMode === 'file_upload' ? '#F0F9FF' : (entryMode === 'natural_language' ? '#EEF2FF' : 'var(--safe-green-light)'),
+              color: entryMode === 'file_upload' ? '#0284C7' : (entryMode === 'natural_language' ? 'var(--brand-blue)' : 'var(--safe-green)'),
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center'
             }}>
-              {entryMode === 'natural_language' ? <Sparkles size={20} /> : <PlusCircle size={20} />}
+              {entryMode === 'file_upload' ? <UploadCloud size={20} /> : (entryMode === 'natural_language' ? <Sparkles size={20} /> : <PlusCircle size={20} />)}
             </div>
             <h3 className="heading-sm" style={{ margin: 0, fontSize: '20px' }}>Add New Transaction</h3>
           </div>
           <p className="body-sm" style={{ color: 'var(--text-secondary)' }}>
-            Log transactions via standard form or natural language text.
+            Log single transactions, use AI natural language, or upload CSV/XLSX datasets.
           </p>
         </div>
 
-        {/* Mode Selector Tabs (Form vs Natural Language) */}
+        {/* 3-Tab Mode Selector */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '6px',
+          gridTemplateColumns: '1fr 1fr 1.2fr',
+          gap: '4px',
           backgroundColor: 'var(--bg-subtle)',
           padding: '4px',
           borderRadius: '12px',
@@ -302,19 +410,19 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
             type="button"
             onClick={() => setEntryMode('form')}
             style={{
-              padding: '8px 12px',
+              padding: '8px 6px',
               borderRadius: '8px',
               border: 'none',
               backgroundColor: entryMode === 'form' ? '#FFFFFF' : 'transparent',
               color: entryMode === 'form' ? 'var(--brand-blue)' : 'var(--text-secondary)',
               fontWeight: '700',
-              fontSize: '13px',
+              fontSize: '12px',
               cursor: 'pointer',
               boxShadow: entryMode === 'form' ? 'var(--shadow-sm)' : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px'
+              gap: '4px'
             }}
           >
             <span>Form Input</span>
@@ -323,23 +431,45 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
             type="button"
             onClick={() => setEntryMode('natural_language')}
             style={{
-              padding: '8px 12px',
+              padding: '8px 6px',
               borderRadius: '8px',
               border: 'none',
               backgroundColor: entryMode === 'natural_language' ? '#FFFFFF' : 'transparent',
               color: entryMode === 'natural_language' ? 'var(--brand-blue)' : 'var(--text-secondary)',
               fontWeight: '700',
-              fontSize: '13px',
+              fontSize: '12px',
               cursor: 'pointer',
               boxShadow: entryMode === 'natural_language' ? 'var(--shadow-sm)' : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px'
+              gap: '4px'
             }}
           >
-            <Sparkles size={14} color="var(--brand-blue)" />
-            <span>Natural Language</span>
+            <Sparkles size={13} color="var(--brand-blue)" />
+            <span>AI Natural</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setEntryMode('file_upload')}
+            style={{
+              padding: '8px 6px',
+              borderRadius: '8px',
+              border: 'none',
+              backgroundColor: entryMode === 'file_upload' ? '#FFFFFF' : 'transparent',
+              color: entryMode === 'file_upload' ? '#0284C7' : 'var(--text-secondary)',
+              fontWeight: '700',
+              fontSize: '12px',
+              cursor: 'pointer',
+              boxShadow: entryMode === 'file_upload' ? 'var(--shadow-sm)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px'
+            }}
+          >
+            <UploadCloud size={14} color="#0284C7" />
+            <span>Upload File</span>
           </button>
         </div>
 
@@ -676,7 +806,187 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction,
             </div>
           </form>
         )}
+
+        {/* ============================================================ */}
+        {/* MODE 3: FILE UPLOAD MODE (CSV / XLSX Ingestion Engine) */}
+        {/* ============================================================ */}
+        {entryMode === 'file_upload' && (
+          <form onSubmit={handleFileUploadSubmit}>
+            {/* Drag & Drop Area */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={handleDrop}
+              style={{
+                border: `2px dashed ${isDragOver ? '#0284C7' : (selectedFile ? '#0284C7' : 'var(--border-color)')}`,
+                backgroundColor: isDragOver ? '#F0F9FF' : (selectedFile ? '#F8FAFC' : 'var(--bg-canvas)'),
+                borderRadius: '16px',
+                padding: '24px 16px',
+                textAlign: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                marginBottom: '16px',
+                position: 'relative'
+              }}
+              onClick={() => document.getElementById('file-upload-input').click()}
+            >
+              <input
+                id="file-upload-input"
+                type="file"
+                accept=".csv, .xlsx, .xls"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+
+              {!selectedFile ? (
+                <>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: '#E0F2FE',
+                    color: '#0284C7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 12px auto'
+                  }}>
+                    <UploadCloud size={24} />
+                  </div>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                    Click to upload or drag & drop file
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Supports bank statement formats: <strong>.csv</strong> or <strong>.xlsx</strong> (Max 10MB)
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      backgroundColor: '#ECFDF5',
+                      color: '#059669',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <FileSpreadsheet size={22} />
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>
+                        {selectedFile.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        {(selectedFile.size / 1024).toFixed(1)} KB • Bank Statement Feed
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedFile(null);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '6px'
+                    }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Upload Summary Stats (if completed) */}
+            {uploadSummary && (
+              <div style={{
+                backgroundColor: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                marginBottom: '16px'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: '#0F172A', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Database size={14} color="#0284C7" />
+                  <span>Dataset Ingestion & Cleaning Report</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                  <div style={{ backgroundColor: '#FFFFFF', padding: '6px 10px', borderRadius: '8px', border: '1px solid #F1F5F9' }}>
+                    Rows Read: <strong>{uploadSummary.total_rows_read}</strong>
+                  </div>
+                  <div style={{ backgroundColor: '#FFFFFF', padding: '6px 10px', borderRadius: '8px', border: '1px solid #F1F5F9' }}>
+                    Duplicates Removed: <strong style={{ color: '#D97706' }}>{uploadSummary.duplicates_removed}</strong>
+                  </div>
+                  <div style={{ backgroundColor: '#FFFFFF', padding: '6px 10px', borderRadius: '8px', border: '1px solid #F1F5F9' }}>
+                    Nulls Sanitized: <strong style={{ color: '#2563EB' }}>{uploadSummary.nulls_filled_count}</strong>
+                  </div>
+                  <div style={{ backgroundColor: '#FFFFFF', padding: '6px 10px', borderRadius: '8px', border: '1px solid #F1F5F9' }}>
+                    Ingested to Firestore: <strong style={{ color: '#059669' }}>{uploadSummary.final_records_count}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Ingestion Engine Rules Feature Box */}
+            <div style={{
+              backgroundColor: '#F0F9FF',
+              border: '1px solid #BAE6FD',
+              borderRadius: '12px',
+              padding: '12px 14px',
+              marginBottom: '20px',
+              fontSize: '12px',
+              color: '#0369A1',
+              lineHeight: '1.5'
+            }}>
+              <strong style={{ color: '#0284C7' }}>⚡ Data Ingestion Rules:</strong>
+              <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                <li>Splits hyphenated narrations (`Method-Merchant-Description`).</li>
+                <li>Fills missing text fields with <code>"NA"</code> or <code>"NAN"</code>.</li>
+                <li>Eliminates duplicate transactions and writes strictly to <strong>Firestore NoSQL DB</strong>.</li>
+              </ul>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                type="button"
+                onClick={handleCloseModal}
+                className="btn btn-secondary"
+                disabled={isUploading}
+                style={{ flex: 1, padding: '12px' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isUploading || !selectedFile}
+                style={{ flex: 1, padding: '12px', backgroundColor: '#0284C7' }}
+              >
+                {isUploading ? (
+                  <>
+                    <RefreshCw size={16} className="spin" />
+                    <span>Cleaning & Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud size={16} />
+                    <span>Upload & Ingest Dataset</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
 }
+

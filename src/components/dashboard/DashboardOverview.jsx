@@ -12,7 +12,8 @@ import {
   Clock,
   RefreshCw,
   Database,
-  Sparkles
+  Sparkles,
+  UploadCloud
 } from 'lucide-react';
 import ShortfallRiskCard from './ShortfallRiskCard';
 
@@ -202,10 +203,16 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
             Real-time liquidity forecasting & Safe-to-Spend intelligence from Neon DB.
           </p>
         </div>
-        <button onClick={onOpenAddModal} className="btn btn-primary" style={{ padding: '10px 20px' }}>
-          <PlusCircle size={18} />
-          <span>+ Add Transaction</span>
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onOpenAddModal} className="btn btn-secondary" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <UploadCloud size={16} color="#0284C7" />
+            <span>Upload CSV / XLSX</span>
+          </button>
+          <button onClick={onOpenAddModal} className="btn btn-primary" style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <PlusCircle size={18} />
+            <span>+ Add Transaction</span>
+          </button>
+        </div>
       </div>
 
       {/* 6-Stat Hero Metrics Grid */}
