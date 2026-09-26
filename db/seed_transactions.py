@@ -31,7 +31,8 @@ def seed_db():
 
         # Check if transactions table already has records for usr-001
         cur.execute("SELECT COUNT(*) FROM transactions WHERE user_id = 'usr-001';")
-        count = cur.fetchone()[0]
+        row = cur.fetchone()
+        count = row[0] if row else 0
 
         if count == 0:
             print("Seeding default transactions for user 'usr-001'...")

@@ -115,7 +115,7 @@ def create_ai_feedback_table():
             feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id VARCHAR(50) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
             chat_id UUID REFERENCES ai_chat(chat_id) ON DELETE SET NULL,
-            feedback_action VARCHAR(20) NOT NULL CHECK (feedback_action IN ('accepted', 'rejected', 'modified')),
+            feedback_action VARCHAR(50) NOT NULL,
             user_comment TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );

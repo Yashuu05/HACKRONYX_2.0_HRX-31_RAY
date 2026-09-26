@@ -377,6 +377,16 @@ def submit_ai_feedback(payload: AIFeedbackSchema):
         from db.database import get_db_connection
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Ensure user exists to satisfy foreign key constraint
+        cur.execute(
+            """
+            INSERT INTO users (user_id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO NOTHING;
+            """,
+            (payload.user_id, f"User {payload.user_id}")
+        )
         
         insert_query = """
             INSERT INTO ai_feedback (user_id, chat_id, feedback_action, user_comment)
@@ -395,6 +405,47 @@ def submit_ai_feedback(payload: AIFeedbackSchema):
         return {"status": "success", "message": "AI feedback logged successfully in PostgreSQL!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/api/feedback/{user_id}")
+def get_user_ai_feedbacks(user_id: str = "usr-001", limit: int = 20):
+    """
+    Fetch stored AI feedback entries for user from Neon PostgreSQL 'ai_feedback' table.
+    """
+    try:
+        from db.database import get_db_connection
+        from psycopg2.extras import RealDictCursor
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT 
+                feedback_id::text,
+                user_id,
+                chat_id::text,
+                feedback_action,
+                user_comment,
+                created_at::text as created_at
+            FROM ai_feedback
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s;
+            """,
+            (user_id, limit)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "total_count": len(rows),
+            "feedbacks": [dict(r) for r in rows]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error fetching AI feedback: {str(e)}")
 
 
 @app.delete("/api/users/{user_id}")
@@ -1033,6 +1084,9 @@ def parse_and_create_natural_language_transaction(payload: NaturalLanguageTransa
         cur.close()
         conn.close()
 
+        if not new_row:
+            raise HTTPException(status_code=500, detail="Failed to create transaction record in database.")
+
         res_dict = dict(new_row)
         res_dict["amount"] = float(res_dict["amount"])
 
@@ -1180,7 +1234,8 @@ async def upload_csv_transactions(
       - Composite key deduplication
       - Batch insertion to Firestore 'transactions' collection
     """
-    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+    filename = file.filename or "statement.csv"
+    if not filename.lower().endswith((".csv", ".xlsx", ".xls")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid file extension. Please upload a .csv or .xlsx bank statement file."
@@ -1193,7 +1248,7 @@ async def upload_csv_transactions(
         file_bytes = await file.read()
         
         # 1. Clean, Parse, and Deduplicate dataset
-        cleaned_records, cleaning_summary = clean_and_parse_csv(file_bytes, file.filename)
+        cleaned_records, cleaning_summary = clean_and_parse_csv(file_bytes, filename)
 
         if not cleaned_records:
             return {
@@ -1208,7 +1263,7 @@ async def upload_csv_transactions(
 
         return {
             "status": "success",
-            "message": f"Successfully ingested and cleaned dataset '{file.filename}' into Firestore!",
+            "message": f"Successfully ingested and cleaned dataset '{filename}' into Firestore!",
             "summary": cleaning_summary,
             "storage_details": db_result,
             "sample_cleaned_records": cleaned_records[:5]

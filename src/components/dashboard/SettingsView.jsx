@@ -20,6 +20,7 @@ export default function SettingsView({ currentUser, onLogout }) {
   // AI Feedback State (ai_feedback table)
   const [feedbackAction, setFeedbackAction] = useState('accepted'); // 'accepted' | 'rejected' | 'modified'
   const [userComment, setUserComment] = useState('');
+  const [feedbackList, setFeedbackList] = useState([]);
 
   // Status Alerts
   const [statusMessage, setStatusMessage] = useState('');
@@ -29,7 +30,21 @@ export default function SettingsView({ currentUser, onLogout }) {
 
   const userId = currentUser?.user_id || currentUser?.id || 'usr-001';
 
-  // Load existing personal information & constants from PostgreSQL on mount
+  const fetchFeedbackList = async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/feedback/${userId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success') {
+          setFeedbackList(data.feedbacks || []);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch feedback history from Neon DB:", err);
+    }
+  };
+
+  // Load existing personal information, constants & feedback from PostgreSQL on mount
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -62,6 +77,7 @@ export default function SettingsView({ currentUser, onLogout }) {
 
     fetchProfile();
     fetchConstants();
+    fetchFeedbackList();
   }, [userId]);
 
   const showNotification = (msg, error = false) => {
@@ -172,6 +188,7 @@ export default function SettingsView({ currentUser, onLogout }) {
 
       showNotification('AI Feedback successfully recorded in PostgreSQL database!');
       setUserComment('');
+      fetchFeedbackList();
     } catch (err) {
       showNotification(err.message || 'Error submitting feedback.', true);
     } finally {
@@ -683,6 +700,75 @@ export default function SettingsView({ currentUser, onLogout }) {
               <Save size={18} />
               <span>{isSaving ? 'Logging Feedback...' : 'Submit AI Feedback'}</span>
             </button>
+          </div>
+
+          {/* Stored Feedback History from Neon PostgreSQL */}
+          <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '700' }}>Active Feedback History (In-Context Prompt Rules)</h4>
+                <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  These rules are automatically loaded into the LLM context during AI conversations.
+                </p>
+              </div>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '11px',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                backgroundColor: '#E8F5E9',
+                color: '#2E7D32',
+                fontWeight: '700'
+              }}>
+                <Database size={12} />
+                Neon DB Synced
+              </span>
+            </div>
+
+            {feedbackList.length === 0 ? (
+              <div style={{ padding: '16px', backgroundColor: 'var(--bg-canvas)', borderRadius: '10px', fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                No feedback history recorded yet. Submit a feedback entry above to train your AI Guardian.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {feedbackList.map((fb, idx) => (
+                  <div key={fb.feedback_id || idx} style={{
+                    padding: '14px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-canvas)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '12px'
+                  }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: '800',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          textTransform: 'uppercase',
+                          backgroundColor: fb.feedback_action === 'accepted' ? '#ECFDF5' : (fb.feedback_action === 'rejected' ? '#FEF2F2' : '#EEF2FF'),
+                          color: fb.feedback_action === 'accepted' ? '#065F46' : (fb.feedback_action === 'rejected' ? '#991B1B' : '#3730A3')
+                        }}>
+                          {fb.feedback_action}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {fb.created_at ? new Date(fb.created_at).toLocaleString() : 'Recent'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                        "{fb.user_comment}"
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </form>
       )}
