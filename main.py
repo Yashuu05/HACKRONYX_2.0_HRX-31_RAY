@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -1084,3 +1084,62 @@ async def chat_stream_endpoint(payload: AIChatStreamRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error initiating AI chat stream: {str(e)}")
+
+
+# ============================================================
+# CSV / DATASET INGESTION ENDPOINT (Pre-processing + Firestore DB)
+# ============================================================
+
+@app.post("/api/transactions/upload-csv", status_code=status.HTTP_201_CREATED)
+async def upload_csv_transactions(
+    file: UploadFile = File(...),
+    user_id: str = Form("usr-001")
+):
+    """
+    Ingest, clean, parse, and store CSV/XLSX bank datasets into Firestore NoSQL DB.
+    Performs:
+      - Null filling ("NA"/"NAN")
+      - Narration string parsing (splits '-' for payment_method, merchant, description)
+      - Composite key deduplication
+      - Batch insertion to Firestore 'transactions' collection
+    """
+    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file extension. Please upload a .csv or .xlsx bank statement file."
+        )
+
+    try:
+        from backend.ingestion.processor import clean_and_parse_csv
+        from backend.db.firestore_client import save_transactions_to_firestore
+
+        file_bytes = await file.read()
+        
+        # 1. Clean, Parse, and Deduplicate dataset
+        cleaned_records, cleaning_summary = clean_and_parse_csv(file_bytes, file.filename)
+
+        if not cleaned_records:
+            return {
+                "status": "warning",
+                "message": "File processed but zero valid transaction records were found.",
+                "summary": cleaning_summary,
+                "inserted_count": 0
+            }
+
+        # 2. Save directly into Firestore NoSQL Database
+        db_result = save_transactions_to_firestore(user_id, cleaned_records)
+
+        return {
+            "status": "success",
+            "message": f"Successfully ingested and cleaned dataset '{file.filename}' into Firestore!",
+            "summary": cleaning_summary,
+            "storage_details": db_result,
+            "sample_cleaned_records": cleaned_records[:5]
+        }
+
+    except Exception as e:
+        print(f"[UploadCSV] Ingestion error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process and ingest dataset: {str(e)}"
+        )
