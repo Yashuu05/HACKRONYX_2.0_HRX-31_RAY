@@ -1086,6 +1086,83 @@ async def chat_stream_endpoint(payload: AIChatStreamRequest):
         raise HTTPException(status_code=500, detail=f"Error initiating AI chat stream: {str(e)}")
 
 
+@app.get("/api/ai/chat/history/{user_id}")
+def get_ai_chat_history(user_id: str, limit: int = 50):
+    """
+    Fetch stored AI conversation history from Neon PostgreSQL `ai_chat` table.
+    Returns the most recent `limit` conversation turns for the given user, sorted newest-first.
+    Schema: chat_id, user_query, ai_response, safe_to_spend_suggested, created_at
+    """
+    try:
+        from db.database import get_db_connection
+        from psycopg2.extras import RealDictCursor
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT
+                chat_id::text,
+                user_id,
+                user_query,
+                ai_response,
+                safe_to_spend_suggested,
+                created_at
+            FROM ai_chat
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s;
+            """,
+            (user_id, limit)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        history = []
+        for r in rows:
+            d = dict(r)
+            if d.get("safe_to_spend_suggested") is not None:
+                d["safe_to_spend_suggested"] = float(d["safe_to_spend_suggested"])
+            d["created_at"] = str(d.get("created_at", ""))
+            history.append(d)
+
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "total_count": len(history),
+            "history": history
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error fetching AI chat history: {str(e)}")
+
+
+@app.delete("/api/ai/chat/history/{user_id}")
+def clear_ai_chat_history(user_id: str):
+    """
+    Delete all AI chat conversation records for a user from the Neon PostgreSQL ai_chat table.
+    Also cascades to ai_feedback entries linked to these chat records (SET NULL via FK).
+    """
+    try:
+        from db.database import get_db_connection
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ai_chat WHERE user_id = %s;", (user_id,))
+        deleted_count = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "message": f"Cleared {deleted_count} AI chat record(s) for user {user_id}.",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error clearing AI chat history: {str(e)}")
+
+
 # ============================================================
 # CSV / DATASET INGESTION ENDPOINT (Pre-processing + Firestore DB)
 # ============================================================

@@ -1,26 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bot, Send, Sparkles, User, ShieldCheck, ArrowRight, HelpCircle, 
-  ThumbsUp, ThumbsDown, Check, X, RefreshCw, MessageSquare
+  ThumbsUp, ThumbsDown, Check, X, RefreshCw, MessageSquare, Trash2
 } from 'lucide-react';
+
+const API_BASE = 'http://localhost:8000';
+
+const INIT_MESSAGE = {
+  id: 'init-1',
+  sender: 'bot',
+  text: "Hello! I am your LangChain-powered AI Cashflow Guardian Assistant. I track your real-time liquidity forecasts, protected bill commitments, and Safe-to-Spend limits from Neon PostgreSQL. How can I assist you today?",
+  traceId: 'TR-LC-INIT',
+  modelUsed: 'LangChain Agent',
+  feedbackStatus: null,
+  chatId: null
+};
 
 export default function AIChatWidget({ initialQuery, currentUser }) {
   const userId = currentUser?.id || 'usr-001';
-  const [messages, setMessages] = useState([
-    {
-      id: 'init-1',
-      sender: 'bot',
-      text: "Hello Riya! I am your LangChain-powered AI Cashflow Guardian Assistant. I track your real-time liquidity forecasts, protected bill commitments, and Safe-to-Spend limits from Neon PostgreSQL. How can I assist you today?",
-      traceId: 'TR-LC-INIT',
-      modelUsed: 'LangChain Agent',
-      feedbackStatus: null // null | 'accepted' | 'rejected' | 'modified'
-    }
-  ]);
+  const [messages, setMessages] = useState([INIT_MESSAGE]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const [inputQuery, setInputQuery] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeFeedbackModal, setActiveFeedbackModal] = useState(null); // msgId | null
   const [feedbackComment, setFeedbackComment] = useState('');
+  const [isClearingHistory, setIsClearingHistory] = useState(false);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -31,11 +36,64 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
     scrollToBottom();
   }, [messages, isStreaming]);
 
+  // Load persisted chat history from Neon PostgreSQL ai_chat table on mount
   useEffect(() => {
-    if (initialQuery) {
+    const loadHistory = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/ai/chat/history/${userId}?limit=30`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.history && data.history.length > 0) {
+          // Convert DB records (newest-first) to chat messages (oldest-first for display)
+          const dbMessages = data.history.slice().reverse().flatMap((record, idx) => [
+            {
+              id: `hist-usr-${record.chat_id || idx}`,
+              sender: 'user',
+              text: record.user_query,
+              chatId: record.chat_id
+            },
+            {
+              id: `hist-bot-${record.chat_id || idx}`,
+              sender: 'bot',
+              text: record.ai_response,
+              traceId: 'TR-LC-HISTORY',
+              modelUsed: 'LangChain Agent',
+              feedbackStatus: null,
+              chatId: record.chat_id,
+              safeToSpend: record.safe_to_spend_suggested,
+              createdAt: record.created_at
+            }
+          ]);
+          setMessages([INIT_MESSAGE, ...dbMessages]);
+        }
+      } catch (err) {
+        console.warn('[AIChatWidget] Could not load chat history:', err);
+      } finally {
+        setHistoryLoaded(true);
+      }
+    };
+    loadHistory();
+  }, [userId]);
+
+  useEffect(() => {
+    if (initialQuery && historyLoaded) {
       handleSend(initialQuery);
     }
-  }, [initialQuery]);
+  }, [initialQuery, historyLoaded]);
+
+  // Clear all chat history from Neon DB and reset UI
+  const handleClearHistory = async () => {
+    if (!window.confirm('Clear all AI conversation history from the database?')) return;
+    setIsClearingHistory(true);
+    try {
+      await fetch(`${API_BASE}/api/ai/chat/history/${userId}`, { method: 'DELETE' });
+      setMessages([INIT_MESSAGE]);
+    } catch (err) {
+      console.error('[AIChatWidget] Clear history error:', err);
+    } finally {
+      setIsClearingHistory(false);
+    }
+  };
 
   const promptChips = [
     "Can I afford a trip of ₹4,000 this weekend?",
@@ -121,6 +179,16 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
                 );
               } else if (data.event === 'done') {
                 currentModel = data.model_used || currentModel;
+                // Capture chat_id from done event for feedback linking
+                if (data.chat_id) {
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === botMsgId
+                        ? { ...msg, chatId: data.chat_id }
+                        : msg
+                    )
+                  );
+                }
               }
             } catch (jsonErr) {
               // Ignore partial JSON chunks
@@ -158,14 +226,18 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
     }
   };
 
-  // Submit user feedback to Neon PostgreSQL ai_feedback table
+  // Submit user feedback to Neon PostgreSQL ai_feedback table (with chat_id linking)
   const handleFeedbackSubmit = async (msgId, action, comment = '') => {
+    // Find the chatId stored on the message to properly link feedback
+    const targetMsg = messages.find(m => m.id === msgId);
+    const chatId = targetMsg?.chatId || null;
     try {
-      await fetch('http://localhost:8000/api/feedback', {
+      await fetch(`${API_BASE}/api/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
+          chat_id: chatId,
           feedback_action: action,
           user_comment: comment || `User marked recommendation as ${action}`
         })
@@ -218,12 +290,47 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
                 }}>
                   LangChain LCEL
                 </span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: '#EFF6FF',
+                  color: 'var(--brand-blue)',
+                  border: '1px solid #BFDBFE'
+                }}>
+                  📦 DB Persisted
+                </span>
               </div>
               <p className="body-sm" style={{ color: 'var(--text-secondary)' }}>
-                Deterministic pre-calculated metrics & real-time streaming with feedback learning.
+                Conversations saved to Neon PostgreSQL · Real-time streaming · Feedback learning
               </p>
             </div>
           </div>
+          {/* Clear History button */}
+          <button
+            onClick={handleClearHistory}
+            disabled={isClearingHistory || isStreaming}
+            title="Clear all conversation history from database"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 14px',
+              borderRadius: '8px',
+              border: '1px solid #FCA5A5',
+              background: '#FFF5F5',
+              color: '#EF4444',
+              fontSize: '12px',
+              fontWeight: '600',
+              cursor: isClearingHistory || isStreaming ? 'not-allowed' : 'pointer',
+              opacity: isClearingHistory || isStreaming ? 0.6 : 1,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Trash2 size={13} />
+            {isClearingHistory ? 'Clearing...' : 'Clear History'}
+          </button>
         </div>
       </div>
 
