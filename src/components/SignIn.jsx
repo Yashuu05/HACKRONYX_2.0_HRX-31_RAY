@@ -123,8 +123,14 @@ export default function SignIn({ onNavigateSignUp, onLoginSuccess }) {
 
     if (authenticatedUser) {
       setIsLoading(false);
+      const activeUser = {
+        ...authenticatedUser,
+        id: authenticatedUser.user_id || authenticatedUser.id,
+        user_id: authenticatedUser.user_id || authenticatedUser.id,
+        full_name: authenticatedUser.full_name || authenticatedUser.name || 'User'
+      };
       if (onLoginSuccess) {
-        onLoginSuccess(authenticatedUser, userToken);
+        onLoginSuccess(activeUser, userToken);
       }
       return;
     }

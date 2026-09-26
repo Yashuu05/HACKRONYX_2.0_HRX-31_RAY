@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 
 export default function AnalyticsView({ currentUser }) {
-  const userId = currentUser?.id || 'usr-001';
+  const userId = currentUser?.user_id || currentUser?.id || 'usr-001';
   const [timeframe, setTimeframe] = useState('30d'); // '7d' | '30d' | '90d' | '180d' | 'all'
   const [granularity, setGranularity] = useState('weekly'); // 'weekly' | 'monthly'
   const [analyticsData, setAnalyticsData] = useState(null);

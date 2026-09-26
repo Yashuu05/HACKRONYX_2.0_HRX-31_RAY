@@ -27,7 +27,7 @@ export default function SettingsView({ currentUser, onLogout }) {
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const userId = currentUser?.id || 'usr-001';
+  const userId = currentUser?.user_id || currentUser?.id || 'usr-001';
 
   // Load existing personal information & constants from PostgreSQL on mount
   useEffect(() => {

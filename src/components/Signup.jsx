@@ -169,7 +169,14 @@ export default function SignUp({ onNavigateSignIn, onSignUpSuccess }) {
     setIsLoading(false);
 
     if (createdUser && onSignUpSuccess) {
-      onSignUpSuccess(createdUser, userToken);
+      const activeUser = {
+        ...createdUser,
+        id: createdUser.user_id || createdUser.id,
+        user_id: createdUser.user_id || createdUser.id,
+        full_name: createdUser.full_name || cleanName,
+        email: createdUser.email || cleanEmail
+      };
+      onSignUpSuccess(activeUser, userToken);
     }
   };
 

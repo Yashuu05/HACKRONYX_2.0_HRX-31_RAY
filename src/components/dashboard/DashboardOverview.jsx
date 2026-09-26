@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import ShortfallRiskCard from './ShortfallRiskCard';
 
-export default function DashboardOverview({ transactions, onOpenAddModal, onNavigateToChat }) {
+export default function DashboardOverview({ transactions, onOpenAddModal, onNavigateToChat, currentUser }) {
+  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
   const [horizonDays, setHorizonDays] = useState(14);
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [recentTransactions, setRecentTransactions] = useState([]);
@@ -39,7 +40,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
     setLoadingRecent(true);
     setRecentError(null);
     try {
-      const response = await fetch('http://localhost:8000/api/transactions/recent?user_id=usr-001&limit=5');
+      const response = await fetch(`http://localhost:8000/api/transactions/recent?user_id=${encodeURIComponent(activeUserId)}&limit=5`);
       if (!response.ok) {
         throw new Error(`Server returned status ${response.status}`);
       }
@@ -61,7 +62,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
   // Fetch user constants (Budget & Safety Buffer) from Neon PostgreSQL
   const fetchUserConstants = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/users/constants/usr-001');
+      const response = await fetch(`http://localhost:8000/api/users/constants/${encodeURIComponent(activeUserId)}`);
       if (response.ok) {
         const data = await response.json();
         if (data && (data.budget_week !== undefined || data.safety_buffer !== undefined)) {
@@ -76,7 +77,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
   // Fetch real-time summary calculations from Neon PostgreSQL
   const fetchSummaryData = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/transactions/summary?user_id=usr-001');
+      const response = await fetch(`http://localhost:8000/api/transactions/summary?user_id=${encodeURIComponent(activeUserId)}`);
       if (response.ok) {
         const data = await response.json();
         if (data.status === 'success') {
@@ -91,7 +92,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
   // Fetch shortfall analysis trajectory from Neon DB
   const fetchShortfallTrajectory = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/api/shortfall/analysis?user_id=usr-001&horizon_days=${horizonDays}`);
+      const res = await fetch(`http://localhost:8000/api/shortfall/analysis?user_id=${encodeURIComponent(activeUserId)}&horizon_days=${horizonDays}`);
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'success' && data.analysis) {
@@ -108,7 +109,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
     fetchUserConstants();
     fetchSummaryData();
     fetchShortfallTrajectory();
-  }, [transactions, horizonDays]);
+  }, [transactions, horizonDays, activeUserId]);
 
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
 
@@ -326,7 +327,7 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
       </div>
 
       {/* Shortfall Risk Detection & Prevention Card */}
-      <ShortfallRiskCard onNavigateToChat={onNavigateToChat} />
+      <ShortfallRiskCard currentUser={currentUser} onNavigateToChat={onNavigateToChat} />
 
       {/* Main Grid: Forecast Chart (Left) + AI Guardian Account Protection Status (Right) */}
       <div style={{

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Download, ArrowUpRight, ArrowDownLeft, RefreshCw, AlertCircle } from 'lucide-react';
 
-export default function TransactionsView({ transactions: propTransactions, onOpenAddModal }) {
+export default function TransactionsView({ transactions: propTransactions, onOpenAddModal, currentUser }) {
+  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
   const [filterType, setFilterType] = useState('all'); // 'all' | 'income' | 'expense' | 'essential'
   const [searchQuery, setSearchQuery] = useState('');
   const [dbTransactions, setDbTransactions] = useState([]);
@@ -13,7 +14,7 @@ export default function TransactionsView({ transactions: propTransactions, onOpe
     setLoading(true);
     setError(null);
     try {
-      let url = `http://localhost:8000/api/transactions?user_id=usr-001&activity_type=${filterType}`;
+      let url = `http://localhost:8000/api/transactions?user_id=${encodeURIComponent(activeUserId)}&activity_type=${filterType}`;
       if (searchQuery.trim()) {
         url += `&search=${encodeURIComponent(searchQuery.trim())}`;
       }
@@ -37,7 +38,7 @@ export default function TransactionsView({ transactions: propTransactions, onOpe
 
   useEffect(() => {
     fetchTransactionsFromDB();
-  }, [filterType, searchQuery]);
+  }, [filterType, searchQuery, activeUserId]);
 
   // Use database transactions if available, otherwise fallback to props
   const displayList = dbTransactions.length > 0 || !error ? dbTransactions : propTransactions.map(t => ({

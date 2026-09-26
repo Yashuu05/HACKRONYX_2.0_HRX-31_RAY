@@ -90,6 +90,25 @@ def signup(payload: SignUpRequest):
 
     MOCK_USERS_DB[email_clean] = new_user
 
+    # Insert new user into Neon PostgreSQL 'users' table
+    try:
+        from db.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO users (user_id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name;
+            """,
+            (new_user["id"], new_user["full_name"])
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as db_err:
+        print(f"Warning inserting user {new_user['id']} into Neon DB: {db_err}")
+
     # Generate mock access token
     token = f"mock-jwt-token-{uuid.uuid4().hex}"
 
@@ -98,6 +117,7 @@ def signup(payload: SignUpRequest):
         access_token=token,
         user={
             "id": new_user["id"],
+            "user_id": new_user["id"],
             "full_name": new_user["full_name"],
             "email": new_user["email"]
         }
@@ -132,6 +152,7 @@ def login(payload: LoginRequest):
         access_token=token,
         user={
             "id": user["id"],
+            "user_id": user["id"],
             "full_name": user["full_name"],
             "email": user["email"]
         }
@@ -161,6 +182,26 @@ def google_auth(payload: GoogleAuthRequest):
         }
 
     user = MOCK_USERS_DB[email_clean]
+
+    # Insert/update user into Neon PostgreSQL 'users' table
+    try:
+        from db.database import get_db_connection
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO users (user_id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name;
+            """,
+            (user["id"], user["full_name"])
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as db_err:
+        print(f"Warning inserting Google user {user['id']} into Neon DB: {db_err}")
+
     token = f"mock-jwt-token-{uuid.uuid4().hex}"
 
     return AuthResponse(
@@ -168,6 +209,7 @@ def google_auth(payload: GoogleAuthRequest):
         access_token=token,
         user={
             "id": user["id"],
+            "user_id": user["id"],
             "full_name": user["full_name"],
             "email": user["email"]
         }

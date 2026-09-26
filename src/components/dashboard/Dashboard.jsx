@@ -20,12 +20,13 @@ export default function Dashboard({ currentUser, onLogout }) {
     setActiveTab('ai-chat');
   };
 
+  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
   const [transactions, setTransactions] = useState([]);
 
-  // Sync user credentials with Firebase & fetch live transactions from Neon DB
+  // Sync user credentials with Firebase & Neon DB & fetch live transactions
   const fetchLiveTransactions = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/transactions?user_id=usr-001');
+      const response = await fetch(`http://localhost:8000/api/transactions?user_id=${encodeURIComponent(activeUserId)}`);
       if (response.ok) {
         const data = await response.json();
         if (data.status === 'success') {
@@ -40,9 +41,18 @@ export default function Dashboard({ currentUser, onLogout }) {
   useEffect(() => {
     if (currentUser) {
       saveUserCredentialsToFirebase(currentUser);
+      // Ensure user exists in Neon DB users table
+      fetch('http://localhost:8000/api/users/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: activeUserId,
+          name: currentUser.full_name || currentUser.name || ('User ' + activeUserId)
+        })
+      }).catch(err => console.warn('Could not sync user to Neon DB:', err));
     }
     fetchLiveTransactions();
-  }, [currentUser]);
+  }, [currentUser, activeUserId]);
 
   const handleAddTransaction = (newTx) => {
     setTransactions((prev) => [newTx, ...prev]);
@@ -63,6 +73,7 @@ export default function Dashboard({ currentUser, onLogout }) {
       <main className="container" style={{ flex: 1, padding: '32px 24px 60px 24px' }}>
         {activeTab === 'overview' && (
           <DashboardOverview
+            currentUser={currentUser}
             transactions={transactions}
             onOpenAddModal={() => setIsAddModalOpen(true)}
             onNavigateToChat={handleNavigateToChat}
@@ -75,6 +86,7 @@ export default function Dashboard({ currentUser, onLogout }) {
 
         {activeTab === 'transactions' && (
           <TransactionsView
+            currentUser={currentUser}
             transactions={transactions}
             onOpenAddModal={() => setIsAddModalOpen(true)}
           />
@@ -93,6 +105,7 @@ export default function Dashboard({ currentUser, onLogout }) {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAddTransaction={handleAddTransaction}
+        currentUser={currentUser}
       />
     </div>
   );

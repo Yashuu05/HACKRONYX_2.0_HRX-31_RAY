@@ -38,7 +38,9 @@ const PAYMENT_METHODS = [
   'Net Banking'
 ];
 
-export default function AddTransactionModal({ isOpen, onClose, onAddTransaction }) {
+export default function AddTransactionModal({ isOpen, onClose, onAddTransaction, currentUser }) {
+  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
+
   // Modal Mode: 'form' | 'natural_language'
   const [entryMode, setEntryMode] = useState('form');
 
@@ -91,7 +93,7 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction 
     setFeedbackStatus(null);
 
     const payload = {
-      user_id: 'usr-001',
+      user_id: activeUserId,
       activity_type: type,
       category: category,
       amount: parseFloat(amount),
@@ -165,7 +167,7 @@ export default function AddTransactionModal({ isOpen, onClose, onAddTransaction 
         body: JSON.stringify({
           text: nlText.trim(),
           transaction_date: nlDate,
-          user_id: 'usr-001'
+          user_id: activeUserId
         })
       });
 

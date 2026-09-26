@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, AlertTriangle, CheckCircle2, TrendingDown, Clock, ShieldCheck, ArrowRight, RefreshCw, Zap, Sparkles } from 'lucide-react';
 
-export default function ShortfallRiskCard({ onApplyClamp, onRefresh, onNavigateToChat }) {
+export default function ShortfallRiskCard({ currentUser, onApplyClamp, onRefresh, onNavigateToChat }) {
+  const activeUserId = currentUser?.user_id || currentUser?.id || 'usr-001';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -11,7 +12,7 @@ export default function ShortfallRiskCard({ onApplyClamp, onRefresh, onNavigateT
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/shortfall/analysis?user_id=usr-001&horizon_days=14');
+      const res = await fetch(`http://localhost:8000/api/shortfall/analysis?user_id=${encodeURIComponent(activeUserId)}&horizon_days=14`);
       if (!res.ok) throw new Error(`Server returned status ${res.status}`);
       const json = await res.json();
       if (json.status === 'success') {
@@ -29,7 +30,7 @@ export default function ShortfallRiskCard({ onApplyClamp, onRefresh, onNavigateT
 
   useEffect(() => {
     fetchShortfallAnalysis();
-  }, []);
+  }, [activeUserId]);
 
   const analysis = data?.analysis || {};
   const reasoning = data?.reasoning || {};
