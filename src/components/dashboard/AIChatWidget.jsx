@@ -16,6 +16,65 @@ const INIT_MESSAGE = {
   chatId: null
 };
 
+// Cleanly format markdown bold, bullet lists, and currency values for enhanced clarity
+function renderFormattedContent(text, isUser = false) {
+  if (!text) return null;
+  const lines = text.split('\n');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {lines.map((line, lineIdx) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return <div key={lineIdx} style={{ height: '4px' }} />;
+        }
+
+        const isBullet = trimmed.startsWith('- ') || trimmed.startsWith('* ');
+        const cleanLine = isBullet ? trimmed.slice(2) : trimmed;
+
+        // Parse **bold** markers
+        const parts = cleanLine.split(/(\*\*.*?\*\*)/g);
+        const renderedParts = parts.map((part, pIdx) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            const boldText = part.slice(2, -2);
+            const isAmount = boldText.includes('₹') || boldText.toLowerCase().includes('safe-to-spend');
+            return (
+              <strong 
+                key={pIdx} 
+                style={{ 
+                  fontWeight: '700', 
+                  color: isUser ? '#FFFFFF' : (isAmount ? '#1D4ED8' : 'inherit'),
+                  backgroundColor: isUser ? 'rgba(255,255,255,0.2)' : (isAmount ? '#EFF6FF' : 'transparent'),
+                  padding: isAmount ? '1px 5px' : '0',
+                  borderRadius: isAmount ? '4px' : '0'
+                }}
+              >
+                {boldText}
+              </strong>
+            );
+          }
+          return part;
+        });
+
+        if (isBullet) {
+          return (
+            <div key={lineIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', paddingLeft: '2px' }}>
+              <span style={{ color: isUser ? '#FFFFFF' : 'var(--brand-blue)', fontWeight: 'bold', fontSize: '15px', lineHeight: '1.5' }}>•</span>
+              <span style={{ flex: 1, lineHeight: '1.5' }}>{renderedParts}</span>
+            </div>
+          );
+        }
+
+        return (
+          <div key={lineIdx} style={{ lineHeight: '1.55' }}>
+            {renderedParts}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AIChatWidget({ initialQuery, currentUser }) {
   const userId = currentUser?.id || 'usr-001';
   const [messages, setMessages] = useState([INIT_MESSAGE]);
@@ -256,7 +315,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(100vh - 90px)', maxHeight: 'calc(100vh - 90px)', width: '100%', boxSizing: 'border-box' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', height: 'calc(100vh - 44px)', maxHeight: 'calc(100vh - 44px)', width: '100%', boxSizing: 'border-box' }}>
       {/* Header */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
@@ -276,7 +335,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h1 className="heading-lg" style={{ fontSize: '24px', margin: 0 }}>
+                <h1 className="heading-lg" style={{ fontSize: '22px', margin: 0, fontWeight: '800', color: '#0F172A' }}>
                   SPECIFY Assistant
                 </h1>
                 <span style={{
@@ -302,7 +361,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
                   📦 DB Persisted
                 </span>
               </div>
-              <p className="body-sm" style={{ color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+              <p className="body-sm" style={{ color: 'var(--text-secondary)', margin: '2px 0 0 0', fontSize: '12px' }}>
                 Conversations saved to Neon PostgreSQL · Real-time streaming · Feedback learning
               </p>
             </div>
@@ -335,20 +394,20 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
       </div>
 
       {/* Main Chat Box Container */}
-      <div className="card" style={{
+      <div style={{
         backgroundColor: '#FFFFFF',
-        borderRadius: '20px',
-        padding: '20px',
+        borderRadius: '16px',
+        padding: '18px 20px',
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        boxShadow: 'var(--shadow-md)',
-        border: '1px solid var(--border-color)',
+        boxShadow: '0 4px 16px -2px rgba(15, 23, 42, 0.05)',
+        border: '1px solid #E2E8F0',
         overflow: 'hidden',
         minHeight: 0
       }}>
         {/* Messages Stream */}
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', paddingRight: '8px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px', paddingRight: '8px' }}>
           {messages.map((m) => (
             <div
               key={m.id}
@@ -356,7 +415,7 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
                 display: 'flex',
                 gap: '12px',
                 alignSelf: m.sender === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: m.sender === 'user' ? '75%' : '85%'
+                maxWidth: m.sender === 'user' ? '75%' : '88%'
               }}
             >
               {m.sender === 'bot' && (
@@ -370,7 +429,8 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
-                  marginTop: '2px'
+                  marginTop: '2px',
+                  border: '1px solid #BFDBFE'
                 }}>
                   <Bot size={18} />
                 </div>
@@ -378,17 +438,17 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
 
               <div style={{
                 backgroundColor: m.sender === 'user' ? 'var(--brand-blue)' : '#F8FAFC',
-                color: m.sender === 'user' ? '#FFFFFF' : 'var(--text-primary)',
-                padding: '16px 20px',
-                borderRadius: m.sender === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                border: m.sender === 'user' ? 'none' : '1px solid var(--border-color)',
+                color: m.sender === 'user' ? '#FFFFFF' : '#1E293B',
+                padding: '14px 18px',
+                borderRadius: m.sender === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                border: m.sender === 'user' ? 'none' : '1px solid #E2E8F0',
                 fontSize: '14px',
                 lineHeight: '1.6',
-                boxShadow: m.sender === 'user' ? '0 4px 12px rgba(37, 99, 235, 0.2)' : 'none'
+                boxShadow: m.sender === 'user' ? '0 4px 12px rgba(37, 99, 235, 0.2)' : '0 1px 3px rgba(0,0,0,0.02)'
               }}>
-                {/* Message text with whitespace preserving for markdown bullets */}
-                <div style={{ whiteSpace: 'pre-line' }}>
-                  {m.text}
+                {/* Formatted message text with bolding and bullet points */}
+                <div>
+                  {renderFormattedContent(m.text, m.sender === 'user')}
                   {m.isStreaming && (
                     <span className="cursor-blink" style={{ display: 'inline-block', width: '6px', height: '14px', backgroundColor: 'var(--brand-blue)', marginLeft: '4px', verticalAlign: 'middle' }} />
                   )}
@@ -555,9 +615,11 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
           display: 'flex',
           gap: '8px',
           overflowX: 'auto',
-          padding: '12px 0',
-          borderTop: '1px solid var(--border-color)',
-          marginTop: '12px'
+          padding: '10px 0',
+          borderTop: '1px solid #F1F5F9',
+          marginTop: '10px',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none'
         }}>
           {promptChips.map((chip, idx) => (
             <button
@@ -566,29 +628,30 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
               disabled={isStreaming}
               style={{
                 padding: '6px 14px',
-                borderRadius: '9999px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-subtle)',
-                color: 'var(--text-secondary)',
+                borderRadius: '20px',
+                border: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+                color: '#475569',
                 fontSize: '12px',
                 fontWeight: '600',
                 whiteSpace: 'nowrap',
                 cursor: isStreaming ? 'not-allowed' : 'pointer',
                 transition: 'all 0.15s ease',
-                opacity: isStreaming ? 0.6 : 1
+                opacity: isStreaming ? 0.6 : 1,
+                flexShrink: 0
               }}
               onMouseEnter={(e) => {
                 if (!isStreaming) {
-                  e.target.style.backgroundColor = '#EFF6FF';
-                  e.target.style.color = 'var(--brand-blue)';
-                  e.target.style.borderColor = '#BFDBFE';
+                  e.currentTarget.style.backgroundColor = '#EFF6FF';
+                  e.currentTarget.style.color = 'var(--brand-blue)';
+                  e.currentTarget.style.borderColor = '#BFDBFE';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isStreaming) {
-                  e.target.style.backgroundColor = 'var(--bg-subtle)';
-                  e.target.style.color = 'var(--text-secondary)';
-                  e.target.style.borderColor = 'var(--border-color)';
+                  e.currentTarget.style.backgroundColor = '#F8FAFC';
+                  e.currentTarget.style.color = '#475569';
+                  e.currentTarget.style.borderColor = '#E2E8F0';
                 }
               }}
             >
@@ -598,36 +661,59 @@ export default function AIChatWidget({ initialQuery, currentUser }) {
         </div>
 
         {/* Input Bar */}
-        <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-          <input
-            type="text"
-            placeholder="Ask Guardian AI about trip affordability, spendings, or savings..."
-            value={inputQuery}
-            onChange={(e) => setInputQuery(e.target.value)}
-            disabled={isStreaming}
-            style={{
-              flex: 1,
-              padding: '12px 18px',
-              borderRadius: '12px',
-              border: '1px solid var(--border-color)',
-              fontSize: '14px',
-              fontFamily: 'var(--font-sans)',
-              outline: 'none',
-              backgroundColor: isStreaming ? 'var(--bg-subtle)' : '#FFFFFF'
-            }}
-          />
+        <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            backgroundColor: isStreaming ? '#F1F5F9' : '#FFFFFF',
+            borderRadius: '12px',
+            border: '1.5px solid #E2E8F0',
+            padding: '2px 14px',
+            transition: 'border-color 0.2s ease',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+          }}>
+            <input
+              type="text"
+              placeholder="Ask Guardian AI about trip affordability, spendings, or savings..."
+              value={inputQuery}
+              onChange={(e) => setInputQuery(e.target.value)}
+              disabled={isStreaming}
+              style={{
+                flex: 1,
+                padding: '10px 4px',
+                borderRadius: '8px',
+                border: 'none',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                outline: 'none',
+                backgroundColor: 'transparent',
+                color: '#0F172A'
+              }}
+            />
+          </div>
           <button
             type="submit"
             className="btn btn-primary"
             disabled={isStreaming || !inputQuery.trim()}
             style={{
-              padding: '12px 22px',
+              padding: '10px 20px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #2563EB, #1D4ED8)',
+              color: '#FFFFFF',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
               opacity: isStreaming || !inputQuery.trim() ? 0.6 : 1,
-              cursor: isStreaming || !inputQuery.trim() ? 'not-allowed' : 'pointer'
+              cursor: isStreaming || !inputQuery.trim() ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+              border: 'none',
+              fontFamily: 'inherit'
             }}
           >
             <span>{isStreaming ? 'Streaming...' : 'Ask AI'}</span>
-            <Send size={16} />
+            <Send size={15} />
           </button>
         </form>
       </div>

@@ -10,14 +10,15 @@ import {
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
-// Firebase configuration from environment or fallback demo configuration
+// Firebase configuration from environment or project configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSySPECIFYianDemoMockKey123",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyA5ULk47ef90AcYIZYSMdjQxdvCnrx3cKY",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "cashflow-guardian-main.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "cashflow-guardian-main",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "cashflow-guardian-main.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "109876543210",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:109876543210:web:abcdef123456"
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "cashflow-guardian-main.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "620173053562",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:620173053562:web:8f6fd9bd01ec8f676db5c3",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-K8KK40SYQQ"
 };
 
 // Initialize Firebase App

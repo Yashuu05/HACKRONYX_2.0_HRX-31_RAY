@@ -55,32 +55,32 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
     setTimeout(fetchLiveTransactions, 500);
   };
 
-  // Track collapsed state for sidebar offset (240 expanded, 72 collapsed)
-  // We pass a callback down to sidebar to track width changes
+  // Track collapsed state for sidebar (240 expanded, 72 collapsed)
   const [collapsed, setCollapsed] = useState(false);
-  const contentOffset = collapsed ? '72px' : '240px';
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-canvas)', display: 'flex' }}>
-      {/* Sidebar — fixed position, takes no flow space */}
+    <div style={{ minHeight: '100vh', width: '100%', backgroundColor: 'var(--bg-canvas)', display: 'flex', position: 'relative' }}>
+      {/* Sidebar — in-flow sticky flex item */}
       <DashboardSidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenAddModal={() => setIsAddModalOpen(true)}
         currentUser={currentUser}
         onLogout={onLogout}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed(prev => !prev)}
         onCollapseChange={setCollapsed}
       />
 
-      {/* Main content area — offset by sidebar width */}
+      {/* Main content area — naturally positioned adjacent to sidebar, never overlapping */}
       <main style={{
         flex: 1,
-        marginLeft: contentOffset,
+        minWidth: 0,
         minHeight: '100vh',
-        transition: 'margin-left 0.25s cubic-bezier(0.4,0,0.2,1)',
-        padding: activeTab === 'matrix' ? '0' : (activeTab === 'ai-chat' ? '20px 24px 20px 24px' : '32px 28px 60px 28px'),
+        padding: activeTab === 'matrix' ? '0' : (activeTab === 'ai-chat' ? '20px 28px' : '32px 28px 60px 28px'),
         backgroundColor: 'var(--bg-canvas)',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        overflowX: 'hidden'
       }}>
         {activeTab === 'overview' && (
           <DashboardOverview

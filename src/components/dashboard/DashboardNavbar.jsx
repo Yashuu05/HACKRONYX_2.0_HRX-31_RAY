@@ -4,13 +4,28 @@ import {
   Settings, PlusCircle, LogOut, Calculator, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
-export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddModal, currentUser, onLogout, onCollapseChange }) {
-  const [collapsed, setCollapsed] = useState(false);
+export default function DashboardSidebar({ 
+  activeTab, 
+  setActiveTab, 
+  onOpenAddModal, 
+  currentUser, 
+  onLogout, 
+  collapsed: propCollapsed, 
+  onCollapseChange,
+  onToggleCollapse
+}) {
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const isControlled = typeof propCollapsed === 'boolean';
+  const collapsed = isControlled ? propCollapsed : internalCollapsed;
 
   const handleToggleCollapse = () => {
-    const next = !collapsed;
-    setCollapsed(next);
-    if (onCollapseChange) onCollapseChange(next);
+    if (onToggleCollapse) {
+      onToggleCollapse();
+    } else {
+      const next = !collapsed;
+      setInternalCollapsed(next);
+      if (onCollapseChange) onCollapseChange(next);
+    }
   };
 
   const tabs = [
@@ -26,17 +41,19 @@ export default function DashboardSidebar({ activeTab, setActiveTab, onOpenAddMod
   return (
     <aside style={{
       width: sidebarWidth,
-      minHeight: '100vh',
+      height: '100vh',
       backgroundColor: '#FFFFFF',
       borderRight: '1px solid #E2E8F0',
       display: 'flex',
       flexDirection: 'column',
-      position: 'fixed',
+      position: 'sticky',
       top: 0,
       left: 0,
-      zIndex: 200,
+      flexShrink: 0,
+      zIndex: 50,
       transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)',
-      overflow: 'hidden',
+      overflowY: 'auto',
+      overflowX: 'hidden',
       boxShadow: '2px 0 12px rgba(0,0,0,0.03)'
     }}>
       {/* Brand */}
