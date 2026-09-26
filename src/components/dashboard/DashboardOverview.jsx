@@ -110,16 +110,35 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
     fetchShortfallTrajectory();
   }, [transactions, horizonDays]);
 
-  // displayRecent strictly uses recentTransactions from Neon DB (no mock fallback)
-  const displayRecent = Array.isArray(recentTransactions) ? recentTransactions : [];
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
 
-  // Determine if there is enough data in Neon DB to calculate a forecast
-  const totalIncome = summaryData !== null && summaryData !== undefined ? Number(summaryData.total_income || 0) : 0;
-  const totalSpendings = summaryData !== null && summaryData !== undefined ? Number(summaryData.total_spendings || 0) : 0;
-  const currentBankBalance = summaryData !== null && summaryData !== undefined ? Number(summaryData.net_balance || 0) : 0;
+  const displayRecent = (Array.isArray(recentTransactions) && recentTransactions.length > 0)
+    ? recentTransactions
+    : safeTransactions.slice(0, 5);
 
-  // Has enough data check
-  const hasEnoughData = (displayRecent.length > 0) || (totalIncome > 0) || (totalSpendings > 0) || (Array.isArray(transactions) && transactions.length > 0);
+  const getTxType = (t) => String(t.activity_type || t.type || 'expense').toLowerCase();
+
+  const localTotalIncome = safeTransactions
+    .filter(t => getTxType(t) === 'income')
+    .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+  const localTotalSpendings = safeTransactions
+    .filter(t => getTxType(t) === 'expense')
+    .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+  const totalIncome = (summaryData && summaryData.status === 'success')
+    ? Number(summaryData.total_income || 0)
+    : localTotalIncome;
+
+  const totalSpendings = (summaryData && summaryData.status === 'success')
+    ? Number(summaryData.total_spendings || 0)
+    : localTotalSpendings;
+
+  const currentBankBalance = (summaryData && summaryData.status === 'success')
+    ? Number(summaryData.net_balance || 0)
+    : (localTotalIncome - localTotalSpendings);
+
+  const hasEnoughData = (displayRecent.length > 0) || (totalIncome > 0) || (totalSpendings > 0) || (safeTransactions.length > 0);
 
   const protectedCommitments = 1200; // Rent + Mess
   const safetyBuffer = Number(userConstants?.safety_buffer) || 3000;

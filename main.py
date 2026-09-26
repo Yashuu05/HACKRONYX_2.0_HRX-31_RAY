@@ -407,6 +407,10 @@ def get_transactions(
             
             row_dict = dict(row)
             row_dict['amount'] = amt
+            row_dict['id'] = row_dict['transaction_id']
+            row_dict['type'] = row_dict['activity_type']
+            row_dict['date'] = row_dict['transaction_date']
+            row_dict['time'] = row_dict['transaction_time']
             row_dict['net_balance'] = round(running_balance, 2)
             enriched_rows.append(row_dict)
 
@@ -460,13 +464,17 @@ def get_recent_transactions(
         query = """
             SELECT 
                 transaction_id as id,
+                transaction_id,
                 user_id,
                 activity_type as type,
+                activity_type,
                 category,
                 amount,
                 description,
                 transaction_date::text as date,
+                transaction_date::text as transaction_date,
                 transaction_time::text as time,
+                transaction_time::text as transaction_time,
                 payment_method,
                 status,
                 created_at
@@ -776,6 +784,18 @@ def create_transaction(payload: TransactionCreateSchema):
         tx_date = payload.transaction_date or datetime.date.today().isoformat()
         tx_time = payload.transaction_time or datetime.datetime.now().strftime("%H:%M:%S")
 
+        target_user_id = payload.user_id or "usr-001"
+
+        # Ensure user exists in 'users' table to satisfy Foreign Key constraint
+        cur.execute(
+            """
+            INSERT INTO users (user_id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO NOTHING;
+            """,
+            (target_user_id, "User " + target_user_id)
+        )
+
         insert_query = """
             INSERT INTO transactions (
                 user_id, activity_type, category, amount, description,
@@ -790,7 +810,7 @@ def create_transaction(payload: TransactionCreateSchema):
         """
 
         cur.execute(insert_query, (
-            payload.user_id,
+            target_user_id,
             payload.activity_type.lower(),
             payload.category,
             payload.amount,
@@ -893,6 +913,18 @@ def parse_and_create_natural_language_transaction(payload: NaturalLanguageTransa
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
+        target_user_id = payload.user_id or "usr-001"
+
+        # Ensure user exists in 'users' table to satisfy Foreign Key constraint
+        cur.execute(
+            """
+            INSERT INTO users (user_id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO NOTHING;
+            """,
+            (target_user_id, "User " + target_user_id)
+        )
+
         insert_query = """
             INSERT INTO transactions (
                 user_id, activity_type, category, amount, description,
@@ -907,7 +939,7 @@ def parse_and_create_natural_language_transaction(payload: NaturalLanguageTransa
         """
 
         cur.execute(insert_query, (
-            payload.user_id or "usr-001",
+            target_user_id,
             activity_type,
             cat_formatted,
             amount_val,

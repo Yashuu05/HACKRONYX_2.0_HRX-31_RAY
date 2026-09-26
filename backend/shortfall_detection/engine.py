@@ -90,10 +90,28 @@ def calculate_shortfall_trajectory(
                 "trajectory": []
             }
 
-        # 3. Fetch future scheduled / protected transactions within horizon
         today = datetime.date.today()
         end_date = today + datetime.timedelta(days=horizon_days)
 
+        # 3. Calculate true daily discretionary burn rate (excluding fixed obligations like Rent/Mess/Repair)
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0) AS total_disc_exp
+            FROM transactions
+            WHERE user_id = %s 
+              AND activity_type = 'expense' 
+              AND category NOT IN ('Mess & Hostel', 'Rent', 'Hostel Fee', 'Tuition', 'Laptop Repair')
+              AND transaction_date <= %s;
+            """,
+            (user_id, today.isoformat())
+        )
+        exp_stats = cur.fetchone()
+        discretionary_total = float(exp_stats['total_disc_exp'] or 0) if exp_stats else 0.0
+        
+        # Calculate daily discretionary velocity (over 30-day baseline)
+        actual_daily_burn = round(discretionary_total / 30.0, 2)
+
+        # 4. Fetch future scheduled transactions within horizon
         cur.execute(
             """
             SELECT 
@@ -127,13 +145,19 @@ def calculate_shortfall_trajectory(
                 'status': tx['status']
             })
 
-        # 4. Project Day-by-Day Trajectory for T days
+        # 5. Project Day-by-Day Trajectory for horizon days
         trajectory = []
         running_bal = current_balance
         
         first_shortfall_day: Optional[int] = None
         first_shortfall_date: Optional[str] = None
         max_shortfall_depth = 0.0
+
+        # Initial check: if current starting balance is already below safety buffer
+        if current_balance < safety_buffer:
+            first_shortfall_day = 1
+            first_shortfall_date = today.isoformat()
+            max_shortfall_depth = round(safety_buffer - current_balance, 2)
 
         for day_idx in range(1, horizon_days + 1):
             target_date = today + datetime.timedelta(days=day_idx)
@@ -151,8 +175,9 @@ def calculate_shortfall_trajectory(
                     else:
                         day_expense += amt
 
-            # Add daily discretionary baseline burn
-            day_expense += daily_burn_baseline
+            # Add actual daily burn rate if no specific scheduled expense is set for this day
+            if day_expense == 0.0:
+                day_expense = actual_daily_burn
 
             # Net day change
             net_day_change = day_income - day_expense
@@ -180,7 +205,7 @@ def calculate_shortfall_trajectory(
                 'shortfall_deficit': shortfall_deficit
             })
 
-        # 5. Risk Score Computation R_shortfall in range [0, 100]
+        # 6. Risk Score Computation
         is_shortfall_predicted = first_shortfall_day is not None
 
         if not is_shortfall_predicted:
@@ -190,7 +215,7 @@ def calculate_shortfall_trajectory(
             # Depth severity score (max 50 points)
             depth_score = (max_shortfall_depth / (safety_buffer + 1.0)) * 50.0
             # Proximity urgency score (max 50 points)
-            urgency_score = max(0.0, (15 - first_shortfall_day)) * 3.5
+            urgency_score = max(0.0, (15 - (first_shortfall_day or 1))) * 3.5
             
             raw_score = depth_score + urgency_score
             risk_score = round(min(100.0, max(15.0, raw_score)), 1)
@@ -203,11 +228,12 @@ def calculate_shortfall_trajectory(
         return {
             "user_id": user_id,
             "horizon_days": horizon_days,
+            "has_enough_data": True,
             "current_balance": current_balance,
             "safety_buffer": safety_buffer,
             "weekly_budget": budget_week,
             "monthly_budget": budget_month,
-            "daily_burn_rate": daily_burn_baseline,
+            "daily_burn_rate": actual_daily_burn,
             "is_shortfall_predicted": is_shortfall_predicted,
             "risk_score": risk_score,
             "risk_level": risk_level,
