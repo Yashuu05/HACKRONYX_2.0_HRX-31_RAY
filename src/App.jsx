@@ -14,6 +14,8 @@ import SignUp from './components/Signup';
 import SignIn from './components/SignIn';
 import Dashboard from './components/dashboard/Dashboard';
 
+import { logoutUser } from './firebase';
+
 export default function App() {
   const [currentView, setCurrentView] = useState('landing'); // 'landing' | 'signup' | 'signin' | 'dashboard'
   const [currentUser, setCurrentUser] = useState(null);
@@ -26,6 +28,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    logoutUser();
     setCurrentUser(null);
     setAuthToken(null);
     setCurrentView('landing');

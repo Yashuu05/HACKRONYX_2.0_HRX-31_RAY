@@ -138,6 +138,42 @@ def login(payload: LoginRequest):
     )
 
 
+class GoogleAuthRequest(BaseModel):
+    email: EmailStr
+    full_name: Optional[str] = "Google User"
+    firebase_uid: Optional[str] = None
+    photo_url: Optional[str] = None
+
+
+@app.post("/api/auth/google", response_model=AuthResponse)
+def google_auth(payload: GoogleAuthRequest):
+    email_clean = payload.email.lower().strip()
+
+    if email_clean not in MOCK_USERS_DB:
+        uid_prefix = payload.firebase_uid[:8] if payload.firebase_uid else uuid.uuid4().hex[:6]
+        user_id = f"usr-{uid_prefix}"
+        MOCK_USERS_DB[email_clean] = {
+            "id": user_id,
+            "full_name": payload.full_name or email_clean.split("@")[0].capitalize(),
+            "email": email_clean,
+            "password": "",  # OAuth
+            "created_at": "2026-09-26T12:00:00Z"
+        }
+
+    user = MOCK_USERS_DB[email_clean]
+    token = f"mock-jwt-token-{uuid.uuid4().hex}"
+
+    return AuthResponse(
+        message="Google authentication successful!",
+        access_token=token,
+        user={
+            "id": user["id"],
+            "full_name": user["full_name"],
+            "email": user["email"]
+        }
+    )
+
+
 @app.get("/api/auth/users")
 def get_mock_users():
     """Debug endpoint to inspect mock database state"""
