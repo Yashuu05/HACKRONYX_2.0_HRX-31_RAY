@@ -18,6 +18,7 @@ import {
 import ShortfallRiskCard from './ShortfallRiskCard';
 import NotificationBell from './NotificationBell';
 import CriticalAlertBanner from './CriticalAlertBanner';
+import WhatIfSimulatorModal from './WhatIfSimulatorModal';
 
 export default function DashboardOverview({ 
   transactions, 
@@ -37,6 +38,7 @@ export default function DashboardOverview({
   const [loadingRecent, setLoadingRecent] = useState(() => (!Array.isArray(transactions) || transactions.length === 0));
   const [recentError, setRecentError] = useState(null);
   const [shortfallTrajectory, setShortfallTrajectory] = useState([]);
+  const [isWhatIfOpen, setIsWhatIfOpen] = useState(false);
 
   // User Constants State (constants table in Neon DB)
   const [userConstants, setUserConstants] = useState({
@@ -254,6 +256,27 @@ export default function DashboardOverview({
             onClick={onToggleNotificationCenter}
             isOpen={isNotificationCenterOpen}
           />
+          <button
+            onClick={() => setIsWhatIfOpen(true)}
+            style={{
+              padding: '10px 16px',
+              borderRadius: '12px',
+              border: '1px solid #C7D2FE',
+              backgroundColor: '#EEF2FF',
+              color: '#4F46E5',
+              fontSize: '13px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 1px 2px rgba(79, 70, 229, 0.05)',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Sparkles size={16} color="#4F46E5" />
+            <span>🔮 What-If Simulator</span>
+          </button>
           <button onClick={onOpenAddModal} className="btn btn-secondary" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <UploadCloud size={16} color="#0284C7" />
             <span>Upload CSV / XLSX</span>
@@ -707,6 +730,14 @@ export default function DashboardOverview({
           </div>
         )}
       </div>
+
+      {/* What-If Counterfactual Pre-Purchase Simulator Modal */}
+      <WhatIfSimulatorModal
+        isOpen={isWhatIfOpen}
+        onClose={() => setIsWhatIfOpen(false)}
+        activeUserId={activeUserId}
+        currentNetBalance={currentBankBalance}
+      />
     </div>
   );
 }

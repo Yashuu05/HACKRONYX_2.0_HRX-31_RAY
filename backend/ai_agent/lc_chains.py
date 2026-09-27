@@ -38,29 +38,12 @@ def load_llm_models_hierarchy() -> List[tuple[str, str, Any]]:
     """
     candidates = []
 
-    # 1. Primary: gemini-3.8-flash (Google)
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            # max_retries=0 ensures that if Google quota is exhausted (HTTP 429), it fails immediately
-            # without hanging for 30-60s on backoff retries, allowing instant fallback to Groq.
-            model_gemini = ChatGoogleGenerativeAI(
-                model="gemini-3.8-flash",
-                google_api_key=gemini_key,
-                temperature=0.2,
-                max_retries=0
-            )
-            candidates.append(("google", "gemini-3.8-flash (Google)", model_gemini))
-        except Exception as e:
-            print(f"[LangChain ChatGoogleGenerativeAI Warning] Failed to init gemini-3.8-flash: {e}")
-
-    # 2. Fallback: openai/gpt-oss-120b (Groq)
+    # 1. Primary: openai/gpt-oss-120b (Groq)
     groq_key = os.getenv("GROQ_API_KEY")
     if groq_key:
         try:
             from langchain_groq import ChatGroq
-            # Fallback model requested by user: openai/gpt-oss-120b via Groq
+            # Primary model requested by user: openai/gpt-oss-120b via Groq
             model_groq = ChatGroq(
                 model="openai/gpt-oss-120b",
                 groq_api_key=groq_key,
@@ -70,6 +53,23 @@ def load_llm_models_hierarchy() -> List[tuple[str, str, Any]]:
             candidates.append(("groq", "openai/gpt-oss-120b (Groq)", model_groq))
         except Exception as e:
             print(f"[LangChain ChatGroq Warning] Failed to init Groq openai/gpt-oss-120b: {e}")
+
+    # 2. Backup / Fallback: gemini-3.8-flash (Google)
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if gemini_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            # max_retries=0 ensures that if Google quota is exhausted (HTTP 429), it fails immediately
+            model_gemini = ChatGoogleGenerativeAI(
+                model="gemini-3.8-flash",
+                google_api_key=gemini_key,
+                temperature=0.2,
+                max_retries=0,
+                request_timeout=10
+            )
+            candidates.append(("google", "gemini-3.8-flash (Google)", model_gemini))
+        except Exception as e:
+            print(f"[LangChain ChatGoogleGenerativeAI Warning] Failed to init gemini-3.8-flash: {e}")
 
     return candidates
 

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import {
   Calculator, Shield, Clock, Flame,
   AlertTriangle, DollarSign, ChevronDown, ChevronUp,
-  BookOpen, Target, BarChart3, PieChart
+  BookOpen, Target, BarChart3, PieChart,
+  Sparkles, GitBranch, Sliders
 } from 'lucide-react';
 
 const categories = [
@@ -10,7 +11,8 @@ const categories = [
   'Spending Analysis',
   'Forecasting Engine',
   'Risk Intelligence',
-  'Analytics Engine'
+  'Analytics Engine',
+  'What-If Pre-Purchase Simulation'
 ];
 
 const formulaData = [
@@ -161,6 +163,69 @@ const formulaData = [
     whyItMatters: 'Identifies whether you are living within your means over time. A spending ratio above 90% indicates elevated vulnerability to surprise expenses.',
     badge: 'Financial Health',
     subFormulas: null,
+  },
+  {
+    id: 'safe-to-swipe-score',
+    icon: Sparkles,
+    category: 'What-If Pre-Purchase Simulation',
+    title: 'Safe-to-Swipe Decision Score (Score_swipe)',
+    subtitle: '0–100 Objective Affordability Index for Discretionary Purchases',
+    formula: 'Score_swipe = clamp(0, 100, 50 + (Safe_Surplus_sim / (S_buffer + 1)) * 50 − Delta_Risk)',
+    formulaTerms: [
+      { term: 'Score_swipe', meaning: '0–100 score indicating whether you can afford this purchase right now (>= 85: Safe to Swipe, 50–84: Caution/Tight, < 50: High Shortfall Risk)' },
+      { term: 'Safe_Surplus_sim', meaning: '(Current_Balance − Purchase_Amount) − Safety_Buffer − Scheduled_Bills_7d. Liquid funds remaining strictly above emergency buffer and immediate commitments' },
+      { term: 'Delta_Risk', meaning: 'Simulated_Risk_Score − Baseline_Risk_Score. The exact jump in shortfall probability caused by making this purchase' },
+      { term: 'clamp(0, 100, ...)', meaning: 'Ensures the score stays bounded between 0 (guaranteed deficit) and 100 (fully safe headroom)' },
+    ],
+    howItWorks: 'Before you swipe your card or pay via UPI, the system simulates deducting the purchase amount from your current balance. It checks if the remaining cash covers both your emergency Safety Buffer and all scheduled fixed commitments (rent, mess, utilities) over the next 7 days. If surplus is positive and no shortfall risk increases, you get a high score (85+). If surplus is negative or shortfall risk spikes, the score plummets.',
+    example: 'Balance = Rs.8,600 | Buffer = Rs.3,000 | Scheduled Bills = Rs.1,200 | Proposed Purchase = Rs.2,500 → Simulated Balance = Rs.6,100 → Safe Surplus = Rs.6,100 − Rs.3,000 − Rs.1,200 = Rs.1,900. Delta Risk = 0 → Score = 50 + (1,900 / 3,001)*50 − 0 = 81.6 → PROCEED WITH CAUTION (Safe to spend drops to Rs.0)',
+    whyItMatters: 'Replaces emotional, impulsive guesswork with an objective 0–100 metric. You instantly know if you have genuine financial headroom or if buying this item steals from your rent or emergency fund.',
+    badge: 'UVP Score',
+    subFormulas: [
+      { label: 'Verdict Tiers', formula: '>= 85: Safe to Swipe | 50–84: Proceed with Caution | < 50: High Shortfall Risk', explanation: 'Instant color-coded guidance: Green = safe purchase, Amber = discretionary freeze required, Red = guaranteed buffer breach' }
+    ],
+  },
+  {
+    id: 'counterfactual-trajectory',
+    icon: GitBranch,
+    category: 'What-If Pre-Purchase Simulation',
+    title: 'Dual-Timeline Trajectory Bifurcation (B_sim vs B_base)',
+    subtitle: 'Comparing Your Financial Future With vs. Without the Purchase',
+    formula: 'B_sim(t) = B_base(t) − Purchase_Amount · [t >= t_purchase]',
+    formulaTerms: [
+      { term: 'B_base(t)', meaning: 'Your baseline projected balance on future day t (1 to 14 days) assuming standard daily burn and scheduled bills' },
+      { term: 'B_sim(t)', meaning: 'Your simulated projected balance on future day t if this purchase is deducted on day t_purchase' },
+      { term: 'Purchase_Amount', meaning: 'The hypothetical expense being evaluated (e.g. Rs.3,800 for headphones)' },
+      { term: 'Deficit_sim(t)', meaning: 'max(0, S_buffer − B_sim(t)) — the exact shortfall depth on day t if buffer is violated' },
+    ],
+    howItWorks: 'The forecasting engine runs twice in parallel: once for your current trajectory (Timeline A), and once with the hypothetical purchase deducted on Day 0 (Timeline B). It graphs both lines simultaneously across the next 14 days, highlighting the exact day and amount where Timeline B dips below the red Safety Buffer floor.',
+    example: 'On Day 5, a Mess Fee of Rs.2,500 is due. Timeline A (No Purchase) balance is Rs.4,100 (Safe). Timeline B (Bought Rs.3,500 gadget) balance drops to Rs.600 on Day 5, causing a Rs.2,400 breach of your Rs.3,000 Safety Buffer.',
+    whyItMatters: 'Humans are terrible at calculating multi-day compounding cashflow in their heads. Seeing two parallel lines split on a chart gives immediate clarity of future consequence.',
+    badge: 'Counterfactual Engine',
+    subFormulas: [
+      { label: 'Buffer Breach Condition', formula: 'Breach = Any day t where B_sim(t) < S_buffer', explanation: 'Flags the exact date of financial impact before you make the purchase' }
+    ],
+  },
+  {
+    id: 'smart-compromise',
+    icon: Sliders,
+    category: 'What-If Pre-Purchase Simulation',
+    title: 'Smart Compromise & Delay Calculator (T_delay & C_safe)',
+    subtitle: 'Mathematically Solving How to Afford Desired Purchases Safely',
+    formula: 'T_delay = min { t | B_base(t) + Inflow(t) − Purchase_Amount >= S_buffer }',
+    formulaTerms: [
+      { term: 'T_delay', meaning: 'Minimum number of days you must postpone the purchase until scheduled income restores safe liquidity' },
+      { term: 'C_safe', meaning: 'Safe Price Ceiling = max(0, Current_Balance − S_buffer − Scheduled_Bills_7d) — the maximum you can safely spend today' },
+      { term: 'Burn_Cut', meaning: 'Daily Burn Reduction = (Breach_Deficit) ÷ Days_to_Breach — daily discretionary savings required to offset the expense' },
+    ],
+    howItWorks: 'Instead of simply saying "No, you cannot afford this", the algorithm calculates three viable counter-offers: (1) When will scheduled income arrive to make this purchase 100% safe? (Time-Shift); (2) What is the maximum discounted price you could safely pay today? (Price Ceiling); (3) How much daily dining/coffee spend must you cut to neutralize the cost? (Micro-Savings).',
+    example: 'Deficit of Rs.1,200 occurs on Day 6. Upcoming Stipend of Rs.5,000 arrives on Day 7. The system outputs: "Delay this purchase by 7 days until your stipend clears, and your risk score drops from 78% to 0%."',
+    whyItMatters: 'Constructive coaching beats negative restriction. Users are far more likely to delay or negotiate a purchase when given the exact date it becomes safe.',
+    badge: 'Compromise Engine',
+    subFormulas: [
+      { label: 'Safe Price Ceiling', formula: 'C_safe = max(0, B_t − S_buffer − Committed_Bills)', explanation: 'The exact maximum amount you can spend today without causing a shortfall' },
+      { label: 'Daily Burn Reduction', formula: 'Daily_Cut = Deficit / Days_to_Shortfall', explanation: 'How much to reduce daily discretionary spending to afford the item' }
+    ],
   }
 ];
 

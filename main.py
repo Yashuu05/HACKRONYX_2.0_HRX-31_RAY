@@ -2805,3 +2805,33 @@ def delete_alert_endpoint(alert_id: str):
         raise HTTPException(status_code=500, detail=f"Database error deleting alert: {str(e)}")
 
 
+class WhatIfSimulationSchema(BaseModel):
+    user_id: Optional[str] = "usr-001"
+    amount: float
+    category: Optional[str] = "Shopping"
+    description: Optional[str] = "Prospective Purchase"
+    horizon_days: Optional[int] = 14
+
+
+@app.post("/api/simulation/what-if")
+def what_if_simulation_endpoint(payload: WhatIfSimulationSchema):
+    """
+    Counterfactual What-If Pre-Purchase Simulation Endpoint.
+    Simulates prospective discretionary purchase against Neon PostgreSQL data.
+    """
+    try:
+        from backend.simulation.what_if import run_what_if_simulation
+        res = run_what_if_simulation(
+            user_id=payload.user_id or "usr-001",
+            amount=payload.amount,
+            category=payload.category or "Shopping",
+            description=payload.description or "Prospective Purchase",
+            horizon_days=payload.horizon_days or 14
+        )
+        return res
+    except Exception as e:
+        print(f"[What-If API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Simulation error: {str(e)}")
+
+
+
