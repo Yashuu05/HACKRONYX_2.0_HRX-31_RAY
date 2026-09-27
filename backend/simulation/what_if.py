@@ -44,17 +44,25 @@ def fetch_user_constants(user_id: str) -> Dict[str, float]:
             (user_id,)
         )
         row = cur.fetchone()
-        if row:
-            return {
-                "budget_month": float(row.get("budget_month") or 10000.0),
-                "budget_week": float(row.get("budget_week") or 5000.0),
-                "safety_buffer": float(row.get("safety_buffer") or 3000.0),
-            }
-        return {
-            "budget_month": 10000.0,
-            "budget_week": 5000.0,
-            "safety_buffer": 3000.0,
+        res = {
+            "budget_month": float(row.get("budget_month") or 10000.0) if row else 10000.0,
+            "budget_week": float(row.get("budget_week") or 5000.0) if row else 5000.0,
+            "safety_buffer": float(row.get("safety_buffer") or 3000.0) if row else 3000.0,
         }
+        # Check persona override if active
+        try:
+            cur.execute("SELECT suggested_safety_buffer, user_safety_buffer_override FROM user_persona WHERE user_id = %s LIMIT 1;", (user_id,))
+            p_row = cur.fetchone()
+            if p_row:
+                ov = p_row.get("user_safety_buffer_override")
+                sg = p_row.get("suggested_safety_buffer")
+                if ov is not None and float(ov) > 0:
+                    res["safety_buffer"] = float(ov)
+                elif sg is not None and float(sg) > 0 and (not row or row.get("safety_buffer") is None):
+                    res["safety_buffer"] = float(sg)
+        except Exception:
+            pass
+        return res
     finally:
         cur.close()
         conn.close()

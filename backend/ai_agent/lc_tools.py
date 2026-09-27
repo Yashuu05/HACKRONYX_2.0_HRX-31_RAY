@@ -63,8 +63,51 @@ def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
         protected_rows = cur.fetchall()
         total_protected = sum(float(r['amount']) for r in protected_rows)
 
-        # 4. Compute Dynamic Safe-to-Spend
+        # 3b. Defensive check for User Persona & Active Fixed Obligations
+        persona_info = None
         safety_buffer = float(const_row.get('safety_buffer', 0) or 0)
+        try:
+            cur.execute(
+                """
+                SELECT suggested_safety_buffer, user_safety_buffer_override, risk_profile, spending_archetype,
+                       total_fixed_expense, total_variable_expense, total_expected_income, net_monthly_surplus,
+                       has_dependents, number_of_dependents, is_primary_breadwinner
+                FROM user_persona
+                WHERE user_id = %s
+                LIMIT 1;
+                """,
+                (user_id,)
+            )
+            persona_row = cur.fetchone()
+            if persona_row:
+                persona_info = dict(persona_row)
+                override_buf = persona_row.get('user_safety_buffer_override')
+                sugg_buf = persona_row.get('suggested_safety_buffer')
+                if override_buf is not None and float(override_buf) > 0:
+                    safety_buffer = float(override_buf)
+                elif sugg_buf is not None and float(sugg_buf) > 0 and safety_buffer == 0:
+                    safety_buffer = float(sugg_buf)
+
+            # Check active fixed expenses if configured
+            cur.execute(
+                """
+                SELECT label, category, amount, due_day_of_month 
+                FROM persona_fixed_expenses 
+                WHERE user_id = %s AND is_active = TRUE
+                ORDER BY due_day_of_month ASC;
+                """,
+                (user_id,)
+            )
+            fixed_rows = cur.fetchall()
+            if fixed_rows:
+                persona_fixed_total = sum(float(fr['amount']) for fr in fixed_rows)
+                if persona_fixed_total > total_protected:
+                    total_protected = persona_fixed_total
+        except Exception as pe:
+            # Gracefully ignore if tables are not queried or missing
+            print(f"[lc_tools persona warning]: {pe}")
+
+        # 4. Compute Dynamic Safe-to-Spend
         safe_to_spend = max(0.0, round(net_balance - total_protected - (safety_buffer * 0.5), 2)) if has_data else 0.0
 
         cur.close()
@@ -83,6 +126,7 @@ def fetch_user_financial_profile(user_id: str = "usr-001") -> Dict[str, Any]:
             "budget_week": float(const_row.get('budget_week', 0) or 0),
             "safe_to_spend": safe_to_spend,
             "total_protected": total_protected,
+            "persona": persona_info,
             "protected_commitments": [
                 {"name": r['description'] or r['category'], "amount": float(r['amount']), "date": r['date']}
                 for r in protected_rows

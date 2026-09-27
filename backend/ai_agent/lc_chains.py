@@ -106,6 +106,12 @@ def evaluate_query_data_availability(query: str, user_id: str) -> tuple[bool, st
     profile = fetch_user_financial_profile(user_id)
     total_txns = profile["income_count"] + profile["expense_count"]
 
+    # Check for persona / archetype queries
+    if any(k in q_lower for k in ['persona', 'archetype', 'spending profile', 'financial fingerprint']):
+        if profile.get("persona"):
+            return True, ""
+        return False, "no data found"
+
     # 1. Check for specific category query
     target_category = None
     search_terms = []
@@ -180,6 +186,19 @@ def determine_tool_context(query: str, user_id: str) -> str:
         f"Upcoming Protected Debits: ₹{profile['total_protected']:,.2f}"
     )
 
+    # Include calibrated User Financial Persona if configured
+    persona = profile.get("persona")
+    if persona:
+        contexts.append(
+            f"[User Financial Persona (Calibrated Ground Truth)]:\n"
+            f"- Risk Profile: {str(persona.get('risk_profile', 'balanced')).capitalize()} | "
+            f"Spending Archetype: {str(persona.get('spending_archetype', 'balanced')).capitalize()}\n"
+            f"- Committed Fixed Expenses: ₹{float(persona.get('total_fixed_expense') or 0):,.2f} | "
+            f"Expected Monthly Variable: ₹{float(persona.get('total_variable_expense') or 0):,.2f}\n"
+            f"- Net Monthly Surplus: ₹{float(persona.get('net_monthly_surplus') or 0):,.2f} | "
+            f"Dependents: {persona.get('number_of_dependents', 0)} (Breadwinner: {persona.get('is_primary_breadwinner', 'no')})"
+        )
+
     # 1. Affordability / Trip / Purchase query
     if any(k in q_lower for k in ['afford', 'trip', 'buy', 'gift', 'spend safely', 'purchase', 'can i']):
         nums = re.findall(r'\d+', q_lower.replace(',', ''))
@@ -248,6 +267,20 @@ def create_deterministic_fallback_response(query: str, user_id: str = "usr-001")
         nums = re.findall(r'\d+', q_lower.replace(',', ''))
         amt = float(nums[0]) if nums else 2000.0
         return check_affordability_tool.invoke({"user_id": user_id, "amount": amt, "category": "general"})
+
+    if any(k in q_lower for k in ['persona', 'archetype', 'fingerprint', 'spending profile']):
+        persona = profile.get("persona")
+        if persona:
+            return (
+                f"Your Calibrated Financial Persona:\n\n"
+                f"- Risk Profile: {str(persona.get('risk_profile', 'balanced')).capitalize()}\n"
+                f"- Spending Archetype: {str(persona.get('spending_archetype', 'balanced')).capitalize()}\n"
+                f"- Committed Fixed Expenses: ₹{float(persona.get('total_fixed_expense') or 0):,.2f}\n"
+                f"- Expected Variable Spend: ₹{float(persona.get('total_variable_expense') or 0):,.2f}\n"
+                f"- Net Monthly Surplus: ₹{float(persona.get('net_monthly_surplus') or 0):,.2f}\n"
+                f"- Dependents: {persona.get('number_of_dependents', 0)}"
+            )
+        return "no persona configured yet"
 
     if any(k in q_lower for k in ['overview', 'transaction', 'summary']):
         return (

@@ -13,12 +13,14 @@ import {
   RefreshCw,
   Database,
   Sparkles,
-  UploadCloud
+  UploadCloud,
+  UserCheck
 } from 'lucide-react';
 import ShortfallRiskCard from './ShortfallRiskCard';
 import NotificationBell from './NotificationBell';
 import CriticalAlertBanner from './CriticalAlertBanner';
 import WhatIfSimulatorModal from './WhatIfSimulatorModal';
+import PersonaWizardModal from '../persona/PersonaWizardModal';
 
 export default function DashboardOverview({ 
   transactions, 
@@ -39,6 +41,7 @@ export default function DashboardOverview({
   const [recentError, setRecentError] = useState(null);
   const [shortfallTrajectory, setShortfallTrajectory] = useState([]);
   const [isWhatIfOpen, setIsWhatIfOpen] = useState(false);
+  const [isPersonaWizardOpen, setIsPersonaWizardOpen] = useState(false);
 
   // User Constants State (constants table in Neon DB)
   const [userConstants, setUserConstants] = useState({
@@ -276,6 +279,28 @@ export default function DashboardOverview({
           >
             <Sparkles size={16} color="#4F46E5" />
             <span>🔮 What-If Simulator</span>
+          </button>
+          <button
+            id="financial-persona-btn"
+            onClick={() => setIsPersonaWizardOpen(true)}
+            style={{
+              padding: '10px 16px',
+              borderRadius: '12px',
+              border: '1px solid #CBD5E1',
+              backgroundColor: '#FFFFFF',
+              color: '#0F172A',
+              fontSize: '13px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <UserCheck size={16} color="#0284C7" />
+            <span>👤 Financial Persona</span>
           </button>
           <button onClick={onOpenAddModal} className="btn btn-secondary" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <UploadCloud size={16} color="#0284C7" />
@@ -737,6 +762,19 @@ export default function DashboardOverview({
         onClose={() => setIsWhatIfOpen(false)}
         activeUserId={activeUserId}
         currentNetBalance={currentBankBalance}
+      />
+
+      {/* Financial Persona Guided Setup Wizard Modal */}
+      <PersonaWizardModal
+        isOpen={isPersonaWizardOpen}
+        onClose={() => setIsPersonaWizardOpen(false)}
+        activeUserId={activeUserId}
+        onPersonaSaved={() => {
+          fetchUserConstants();
+          fetchSummaryData();
+          fetchShortfallTrajectory();
+          fetchRecentTransactions();
+        }}
       />
     </div>
   );

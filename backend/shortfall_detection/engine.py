@@ -152,6 +152,67 @@ def calculate_shortfall_trajectory(
                 'status': tx['status']
             })
 
+        # 4b. Defensive check for scheduled Persona Income & Fixed Obligations
+        try:
+            # Check persona income schedule for forward credits
+            cur.execute(
+                """
+                SELECT expected_date::text as exp_date, expected_amount, date_confidence
+                FROM persona_income_schedule
+                WHERE user_id = %s 
+                  AND expected_date > %s 
+                  AND expected_date <= %s
+                  AND status != 'cancelled';
+                """,
+                (user_id, today.isoformat(), end_date.isoformat())
+            )
+            sched_inflows = cur.fetchall() or []
+            for inc in sched_inflows:
+                d_str = inc['exp_date']
+                if d_str not in future_tx_by_date:
+                    future_tx_by_date[d_str] = []
+                future_tx_by_date[d_str].append({
+                    'activity_type': 'income',
+                    'category': 'Scheduled Income',
+                    'amount': float(inc['expected_amount']),
+                    'description': f"Persona Credit ({inc['date_confidence']} confidence)",
+                    'status': 'Scheduled'
+                })
+
+            # Check active fixed bills with due dates falling in the horizon
+            cur.execute(
+                """
+                SELECT label, category, amount, due_day_of_month
+                FROM persona_fixed_expenses
+                WHERE user_id = %s AND is_active = TRUE;
+                """,
+                (user_id,)
+            )
+            fixed_bills = cur.fetchall() or []
+            for fb in fixed_bills:
+                due_day = int(fb.get('due_day_of_month') or 0)
+                if 1 <= due_day <= 31:
+                    for d_idx in range(1, horizon_days + 1):
+                        chk_date = today + datetime.timedelta(days=d_idx)
+                        if chk_date.day == due_day:
+                            d_str = chk_date.isoformat()
+                            if d_str not in future_tx_by_date:
+                                future_tx_by_date[d_str] = []
+                            already_has = any(
+                                t.get('description') == fb['label'] or t.get('category') == fb['category']
+                                for t in future_tx_by_date[d_str]
+                            )
+                            if not already_has:
+                                future_tx_by_date[d_str].append({
+                                    'activity_type': 'expense',
+                                    'category': fb['category'] or 'Fixed Obligation',
+                                    'amount': float(fb['amount']),
+                                    'description': fb['label'] or 'Fixed Expense',
+                                    'status': 'Committed'
+                                })
+        except Exception as pe:
+            print(f"[Shortfall Engine Persona Link Warning]: {pe}")
+
         # 5. Project Day-by-Day Trajectory for horizon days
         trajectory = []
         running_bal = current_balance

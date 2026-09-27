@@ -2834,4 +2834,148 @@ def what_if_simulation_endpoint(payload: WhatIfSimulationSchema):
         raise HTTPException(status_code=500, detail=f"Simulation error: {str(e)}")
 
 
+# ============================================================================
+# PERSONA CREATION & PERSONALIZATION ENDPOINTS
+# ============================================================================
+
+class FixedExpenseItemSchema(BaseModel):
+    label: str
+    category: Optional[str] = "other"
+    amount: float
+    due_day_of_month: Optional[int] = None
+    due_day_buffer: Optional[int] = 0
+    payment_mode: Optional[str] = "auto_debit"
+    is_active: Optional[bool] = True
+    notes: Optional[str] = None
+
+
+class VariableExpenseItemSchema(BaseModel):
+    label: str
+    category: Optional[str] = "other"
+    expected_monthly_amount: float
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
+    is_active: Optional[bool] = True
+    notes: Optional[str] = None
+
+
+class IncomeSourceItemSchema(BaseModel):
+    source_name: str
+    income_type: Optional[str] = "salary"
+    stream_nature: Optional[str] = "scheduled"
+    expected_amount: float
+    frequency: Optional[str] = "monthly"
+    expected_credit_day: Optional[int] = None
+    credit_day_buffer: Optional[int] = 2
+    payment_mode: Optional[str] = "bank_transfer"
+    reliability: Optional[str] = "always_on_time"
+    employer_or_source: Optional[str] = None
+    is_active: Optional[bool] = True
+    notes: Optional[str] = None
+
+
+class DependentItemSchema(BaseModel):
+    relationship: str
+    age_group: Optional[str] = None
+    monthly_support_amount: Optional[float] = 0.0
+    is_fixed_transfer: Optional[bool] = True
+    notes: Optional[str] = None
+
+
+class PersonaSetupSchema(BaseModel):
+    user_id: Optional[str] = "usr-001"
+    has_dependents: Optional[bool] = False
+    is_primary_breadwinner: Optional[str] = "no"
+    emergency_fund_preference: Optional[str] = "none"
+    user_safety_buffer_override: Optional[float] = None
+    fixed_expenses: Optional[List[FixedExpenseItemSchema]] = []
+    variable_expenses: Optional[List[VariableExpenseItemSchema]] = []
+    income_sources: Optional[List[IncomeSourceItemSchema]] = []
+    dependents: Optional[List[DependentItemSchema]] = []
+
+
+@app.post("/api/persona/setup")
+def setup_persona_endpoint(payload: PersonaSetupSchema):
+    """
+    Submits and establishes a complete financial persona for a user in a single atomic transaction.
+    Persists across user_persona, persona_fixed_expenses, persona_variable_expenses,
+    persona_income_sources, persona_dependents, persona_income_schedule, and syncs constants.
+    """
+    try:
+        from backend.persona.engine import save_full_persona
+        user_id = payload.user_id or "usr-001"
+        dict_payload = {
+            "has_dependents": payload.has_dependents,
+            "is_primary_breadwinner": payload.is_primary_breadwinner,
+            "emergency_fund_preference": payload.emergency_fund_preference,
+            "user_safety_buffer_override": payload.user_safety_buffer_override,
+            "fixed_expenses": [i.dict() for i in (payload.fixed_expenses or [])],
+            "variable_expenses": [i.dict() for i in (payload.variable_expenses or [])],
+            "income_sources": [i.dict() for i in (payload.income_sources or [])],
+            "dependents": [i.dict() for i in (payload.dependents or [])]
+        }
+        res = save_full_persona(user_id=user_id, payload=dict_payload)
+        return res
+    except Exception as e:
+        print(f"[Persona Setup API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Error saving persona: {str(e)}")
+
+
+@app.get("/api/persona/{user_id}")
+def get_persona_endpoint(user_id: str):
+    """
+    Fetches a user's complete financial persona, including master record,
+    fixed expenses, variable expenses, income sources, dependents, and income schedule.
+    """
+    try:
+        from backend.persona.engine import get_full_persona
+        return get_full_persona(user_id=user_id)
+    except Exception as e:
+        print(f"[Persona Get API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching persona: {str(e)}")
+
+
+@app.put("/api/persona/{user_id}")
+def update_persona_endpoint(user_id: str, updates: Dict[str, Any]):
+    """
+    Updates top-level persona fields (such as manual buffer override or breadwinner status)
+    and recomputes downstream metrics.
+    """
+    try:
+        from backend.persona.engine import update_top_level_persona
+        return update_top_level_persona(user_id=user_id, updates=updates)
+    except Exception as e:
+        print(f"[Persona Update API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating persona: {str(e)}")
+
+
+@app.get("/api/persona/{user_id}/income-schedule")
+def get_persona_income_schedule_endpoint(user_id: str):
+    """
+    Retrieves the 30-day forward income schedule calendar for the user.
+    """
+    try:
+        from backend.persona.engine import get_user_income_schedule
+        rows = get_user_income_schedule(user_id=user_id)
+        return {"status": "success", "user_id": user_id, "schedule": rows}
+    except Exception as e:
+        print(f"[Persona Schedule API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching income schedule: {str(e)}")
+
+
+@app.post("/api/persona/{user_id}/recompute")
+def recompute_persona_endpoint(user_id: str):
+    """
+    Triggers an on-demand re-calculation of derived persona metrics and regenerates
+    the forward income schedule.
+    """
+    try:
+        from backend.persona.engine import recompute_persona
+        return recompute_persona(user_id=user_id)
+    except Exception as e:
+        print(f"[Persona Recompute API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Error recomputing persona: {str(e)}")
+
+
+
 
