@@ -7,6 +7,7 @@ import AIChatWidget from './AIChatWidget';
 import SettingsView from './SettingsView';
 import AddTransactionModal from './AddTransactionModal';
 import MatrixExplanation from './MatrixExplanation';
+import NotificationCenter from './NotificationCenter';
 import { saveUserCredentialsToFirebase } from '../../firebase';
 
 export default function Dashboard({ currentUser, onLogout, initialTab }) {
@@ -14,6 +15,11 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [chatInitialQuery, setChatInitialQuery] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(240);
+
+  // Condition Alerts State (connected to Neon PostgreSQL 'alerts' table)
+  const [alerts, setAlerts] = useState([]);
+  const [unreadAlertsCount, setUnreadAlertsCount] = useState(0);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
 
   const handleNavigateToChat = (queryText) => {
     if (queryText) setChatInitialQuery(queryText);
@@ -35,6 +41,55 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
     }
   };
 
+  const fetchLiveAlerts = async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/alerts?user_id=${encodeURIComponent(activeUserId)}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success') {
+          setAlerts(data.alerts || []);
+          setUnreadAlertsCount(data.unread_count || 0);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch live alerts:', err);
+    }
+  };
+
+  const handleMarkAlertRead = async (alertId) => {
+    try {
+      await fetch(`http://localhost:8000/api/alerts/${encodeURIComponent(alertId)}/read`, { method: 'PATCH' });
+      setAlerts((prev) => prev.map((a) => (a.alert_id === alertId ? { ...a, is_read: true } : a)));
+      setUnreadAlertsCount((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      console.warn('Failed to mark alert as read:', err);
+    }
+  };
+
+  const handleMarkAllAlertsRead = async () => {
+    try {
+      await fetch('http://localhost:8000/api/alerts/read-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: activeUserId })
+      });
+      setAlerts((prev) => prev.map((a) => ({ ...a, is_read: true })));
+      setUnreadAlertsCount(0);
+    } catch (err) {
+      console.warn('Failed to mark all alerts read:', err);
+    }
+  };
+
+  const handleDeleteAlert = async (alertId) => {
+    try {
+      await fetch(`http://localhost:8000/api/alerts/${encodeURIComponent(alertId)}`, { method: 'DELETE' });
+      setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
+      setUnreadAlertsCount((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      console.warn('Failed to delete alert:', err);
+    }
+  };
+
   useEffect(() => {
     if (currentUser) {
       saveUserCredentialsToFirebase(currentUser);
@@ -48,11 +103,16 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
       }).catch(err => console.warn('Could not sync user to Neon DB:', err));
     }
     fetchLiveTransactions();
+    fetchLiveAlerts();
   }, [currentUser, activeUserId]);
 
   const handleAddTransaction = (newTx) => {
     setTransactions((prev) => [newTx, ...prev]);
-    setTimeout(fetchLiveTransactions, 500);
+    // Immediate reactive refresh for both transactions and condition alerts
+    setTimeout(() => {
+      fetchLiveTransactions();
+      fetchLiveAlerts();
+    }, 400);
   };
 
   // Track collapsed state for sidebar (240 expanded, 72 collapsed)
@@ -70,6 +130,8 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed(prev => !prev)}
         onCollapseChange={setCollapsed}
+        unreadAlertsCount={unreadAlertsCount}
+        onToggleNotificationCenter={() => setIsNotificationCenterOpen(prev => !prev)}
       />
 
       {/* Main content area — naturally positioned adjacent to sidebar, never overlapping */}
@@ -88,6 +150,11 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
             transactions={transactions}
             onOpenAddModal={() => setIsAddModalOpen(true)}
             onNavigateToChat={handleNavigateToChat}
+            alerts={alerts}
+            unreadAlertsCount={unreadAlertsCount}
+            isNotificationCenterOpen={isNotificationCenterOpen}
+            onToggleNotificationCenter={() => setIsNotificationCenterOpen(prev => !prev)}
+            onMarkAlertRead={handleMarkAlertRead}
           />
         )}
         {activeTab === 'analytics' && (
@@ -117,6 +184,19 @@ export default function Dashboard({ currentUser, onLogout, initialTab }) {
         onAddTransaction={handleAddTransaction}
         currentUser={currentUser}
       />
+
+      {/* Notification Center Popover / Drawer */}
+      <NotificationCenter
+        isOpen={isNotificationCenterOpen}
+        onClose={() => setIsNotificationCenterOpen(false)}
+        alerts={alerts}
+        unreadCount={unreadAlertsCount}
+        onMarkRead={handleMarkAlertRead}
+        onMarkAllRead={handleMarkAllAlertsRead}
+        onDeleteAlert={handleDeleteAlert}
+        onNavigateToChat={handleNavigateToChat}
+      />
     </div>
   );
 }
+

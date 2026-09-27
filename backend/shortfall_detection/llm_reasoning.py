@@ -50,7 +50,7 @@ class LLMShortfallReasoner:
                 google_api_key=gemini_key,
                 temperature=0.3,
                 max_retries=0,
-                request_timeout=3
+                request_timeout=10
             )
         elif prov == "groq":
             from langchain_groq import ChatGroq

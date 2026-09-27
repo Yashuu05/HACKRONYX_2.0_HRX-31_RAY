@@ -1,107 +1,224 @@
-# Implementation Plan — CSV/XLSX Engine & Firestore Ingestion
+# Implementation Plan — Condition-Based Alert System
 
-> **Project:** SPECIFY  
-> **Module:** Core Dataset Ingestion Engine (Backend Only)  
-> **Target Document:** `implementation_plan.md`  
-
----
-
-## 1. Overview & Architectural Shift
-
-The objective of this task is to implement the **Core Data Ingestion Engine** responsible for uploading, cleaning, preprocessing, and storing bank transaction datasets (`.csv` / `.xlsx`) strictly into **Google Cloud Firestore (NoSQL Database)**.
-
-In accordance with the updated guidelines:
-- **No Frontend Changes**: Work will focus exclusively on backend file processing, cleaning logic, and Firestore database integration.
-- **Strict NoSQL Storage**: Cleaned transaction records will be saved into **Firestore**, using the `cashflow-guardian-main` Firebase project context.
+> **Project:** SPECIFY (AI Cashflow Guardian)  
+> **Module:** Proactive Alert Engine & Neon Database Notification Center  
+> **Database:** Neon PostgreSQL (`alerts` table)  
+> **Document Purpose:** Architectural Specification & Implementation Blueprint  
 
 ---
 
-## 2. Scope of Implementation
+## 1. Executive Summary & Objective
+
+SPECIFY currently computes real-time metrics including **Net Bank Balance**, **Safe-to-Spend**, **Safety Buffer**, **Weekly Budget**, **Monthly Budget**, and **Shortfall Trajectory**. However, while the database schema in Neon PostgreSQL includes an `alerts` table, it currently contains zero records and is disconnected from the operational pipeline.
+
+The goal of this implementation is to establish a **continuous, condition-based Alert Engine** that:
+1. Automatically audits user telemetry against pre-defined financial rules (e.g., net balance dropping below monthly or weekly budgets, safety buffer breaches, spending velocity spikes).
+2. Persists structured notifications into the Neon PostgreSQL `alerts` table with cooldown deduplication.
+3. Exposes a non-intrusive **Notification Center & Alert Bell** in the frontend dashboard, allowing users to observe, acknowledge, and resolve alerts without altering or disrupting any existing dashboard features.
+
+---
+
+## 2. Task 1: Taxonomy of Condition-Based Alerts
+
+The alert engine operates on pre-defined mathematical rules comparing **current net balance**, **cumulative spend**, **configured budget constants**, and **transaction velocity**.
+
+Every alert strictly complies with the PostgreSQL `alert_level` constraint:
+$$\text{alert\_level} \in \{\text{'low'}, \text{'mid'}, \text{'high'}, \text{'critical'}\}$$
+
+### Alert Types & Mathematical Rules
+
+| Alert Type | Level | Mathematical Condition | Trigger Rationale | User-Facing Notification Template |
+| :--- | :---: | :--- | :--- | :--- |
+| **`NET_BALANCE_BELOW_WEEKLY_BUDGET`** | `mid` | $\text{Net Balance} < \text{Weekly Budget}$ and $\text{Net Balance} \ge \text{Safety Buffer}$ | User has less total liquid cash than their standard 7-day spending target. | *"Your net balance (₹{balance}) has dropped below your weekly budget allowance (₹{weekly_budget}). Immediate spending restraint advised."* |
+| **`NET_BALANCE_BELOW_MONTHLY_BUDGET`** | `low` | $\text{Net Balance} < \text{Monthly Budget}$ and $\text{Net Balance} \ge \text{Weekly Budget}$ | Cash reserves have fallen below the 30-day baseline target. Early warning indicator. | *"Your current balance (₹{balance}) is now below your monthly budget target of ₹{monthly_budget}. Review upcoming discretionary commitments."* |
+| **`SAFETY_BUFFER_BREACH_IMMINENT`** | `critical` | $\text{Net Balance} < \text{Safety Buffer}$ | Emergency capital is actively breached. Immediate liquidity crisis risk. | *"CRITICAL: Bank balance (₹{balance}) has breached your emergency safety buffer (₹{safety_buffer}). Deficit is ₹{deficit}."* |
+| **`WEEKLY_BUDGET_OVERRUN`** | `high` | $\sum_{7\text{ days}} \text{Expenses} > \text{Weekly Budget}$ | Cumulative spend in the last 7 rolling days has exceeded the user's allocated limit. | *"Weekly budget exceeded! You spent ₹{week_spend} over the last 7 days against your ₹{weekly_budget} limit (+₹{overrun})."* |
+| **`HIGH_DISCRETIONARY_BURN_RATE`** | `mid` | $\text{Daily Burn Velocity} > 1.5 \times \left(\frac{\text{Weekly Budget}}{7}\right)$ | Discretionary outflow velocity is >50% above the baseline daily sustainable burn rate. | *"Spending velocity surge: Your recent outflow is ₹{daily_burn}/day, exceeding your ₹{daily_burn_baseline}/day baseline."* |
+| **`LARGE_ANOMALOUS_EXPENSE`** | `high` | Single Expense $\ge 0.5 \times \text{Safety Buffer}$ or $\ge 0.35 \times \text{Net Balance}$ | A single transaction absorbed a major fraction of emergency reserves. | *"Large debit detected: An expense of ₹{amount} ('{description}') absorbed {pct}% of your safety reserves."* |
+| **`SAFE_TO_SPEND_EXHAUSTED`** | `high` | $\text{Safe-to-Spend} \le 0$ while $\text{Net Balance} > 0$ | Mandatory bills (Rent/Mess) and safety buffer lock all remaining liquid cash. | *"Safe-to-Spend is ₹0.00 today. All remaining funds are strictly reserved for protected bills and emergency buffer."* |
+| **`UPCOMING_BILL_COLLISION`** | `mid` | $\text{Net Balance} - \text{Upcoming Bill} < \text{Safety Buffer}$ (within 3 days) | A scheduled recurring debit will push the balance below buffer if not replenished. | *"Upcoming debit alert: Protected payment of ₹{bill_amount} on {date} will leave your safety buffer vulnerable."* |
+
+---
+
+## 3. Task 2: Storage & Persistence in Neon Database
+
+### 3.1 Database Schema Alignment
+The `alerts` table in the Neon PostgreSQL database (`cashflow_db`) is pre-configured with the following structure:
+
+```sql
+CREATE TABLE IF NOT EXISTS alerts (
+    alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(50) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    alert_level VARCHAR(20) NOT NULL CHECK (alert_level IN ('low', 'mid', 'high', 'critical')),
+    alert_type VARCHAR(50) NOT NULL,
+    message TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 3.2 Deduplication & 24-Hour Cooldown Strategy
+To prevent spamming the database whenever a user refreshes their dashboard or records multiple small transactions:
+1. **Cooldown Window**: Before inserting a new alert of type `T` for user `U`, the evaluator checks if an identical `alert_type` was created within the last **24 hours** (or is currently unread):
+   ```sql
+   SELECT COUNT(*) FROM alerts
+   WHERE user_id = %s
+     AND alert_type = %s
+     AND (is_read = FALSE OR created_at > NOW() - INTERVAL '24 HOURS');
+   ```
+2. **State Transition Insertion**: If the condition is resolved (e.g. user deposits income and balance rises above buffer), the alert is naturally resolved or can be auto-archived. When the threshold is re-breached after resolution, a fresh alert is logged.
+
+### 3.3 Backend Evaluation Engine (`backend/alerts/engine.py`)
+A modular alert engine evaluated asynchronously:
+* **Function**: `evaluate_user_alerts(user_id: str) -> List[Dict[str, Any]]`
+  * Reads current user constants (`budget_week`, `budget_month`, `safety_buffer`) from the `constants` table.
+  * Queries real-time transaction aggregates (net balance, 7-day spend, daily burn) from the `transactions` table.
+  * Evaluates the 8 alert conditions in sequence.
+  * Filters out alerts currently in the cooldown window.
+  * Performs batch `INSERT INTO alerts` for newly triggered conditions.
+  * Returns the active alert list with unread counts.
+
+### 3.4 API Endpoints in FastAPI (`main.py`)
+1. **`GET /api/alerts?user_id={user_id}&unread_only={bool}&limit=50`**
+   * Returns: `{ "status": "success", "unread_count": int, "alerts": [...] }`
+2. **`POST /api/alerts/evaluate/{user_id}`**
+   * Manually triggers evaluation and returns newly created alerts.
+3. **`PATCH /api/alerts/{alert_id}/read`**
+   * Marks a specific alert as read (`is_read = TRUE`).
+4. **`POST /api/alerts/read-all`**
+   * Body: `{ "user_id": str }` $\rightarrow$ Sets `is_read = TRUE` for all user alerts.
+5. **`DELETE /api/alerts/{alert_id}`**
+   * Deletes an acknowledged notification from the database.
+
+### 3.5 Operational Trigger Hooks
+The alert engine will automatically execute upon:
+* **Hook A**: Any transaction creation (`POST /api/transactions`, `POST /api/transactions/quick-add`, `POST /api/transactions/nl-add`, CSV dataset upload).
+* **Hook B**: User constants update (`PUT /api/users/constants/{user_id}`).
+* **Hook C**: Periodic client mount check on Dashboard Overview.
+
+---
+
+## 4. Task 3: Frontend Dashboard Integration (Non-Intrusive Access)
+
+To ensure **zero disturbance** to existing features (Overview, Analytics, Transactions, AI Guardian, Matrix Explanation, Settings), the alert interface is integrated via a **non-intrusive notification architecture**.
 
 ```
-┌──────────────────┐     ┌────────────────────────────────────────────────────────┐     ┌────────────────────────┐
-│  Upload Endpoint │ ──► │  Cleaning & Normalization Engine                       │ ──► │ Firestore Database     │
-│  (.csv / .xlsx)  │     │  • Fill nulls ("NA"/"NAN")                             │     │ (NoSQL Collection)     │
-│                  │     │  • Composite Deduplication                             │     │ • `transactions`       │
-│                  │     │  • Date/Amount Formatting & Activity Normalization      │     │   documents            │
-└──────────────────┘     └────────────────────────────────────────────────────────┘     └────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│  SPECIFY Dashboard Navbar / Header                                                     │
+│  [Logo] SPECIFY      [Dashboard Tabs...]          [ 🔔 Alerts (3) ]   [User Avatar]    │
+└───────────────────────────────────────────────────┬────────────────────────────────────┘
+                                                    │
+                                                    ▼ (Click triggers flyout)
+                       ┌────────────────────────────────────────────────────────────────┐
+                       │  🔔 NOTIFICATION CENTER                                         │
+                       │  [All (5)]  [Unread (3)]  [Critical (1)]     [Mark all read ✓]  │
+                       ├────────────────────────────────────────────────────────────────┤
+                       │  🔴 CRITICAL • 10m ago                           [Mark Read ✓] │
+                       │  Safety Buffer Breached! Net balance (₹250.00) is ₹1,750 below │
+                       │  your ₹2,000 emergency buffer.                                 │
+                       ├────────────────────────────────────────────────────────────────┤
+                       │  🟠 HIGH • 1h ago                                [Mark Read ✓] │
+                       │  Weekly Budget Overrun: You spent ₹2,600 in the last 7 days.   │
+                       ├────────────────────────────────────────────────────────────────┤
+                       │  🔵 MID • Yesterday                              [Mark Read ✓] │
+                       │  Net Balance below Weekly Budget target (₹2,500.00).           │
+                       └────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Components to Build:
-1. **Python Dependencies**:
-   - Add `firebase-admin` (or `google-cloud-firestore`) and `openpyxl` to `pyproject.toml`.
-2. **Firestore DB Connection (`backend/db/firestore_client.py`)**:
-   - Initialize connection to Firestore database (`cashflow-guardian-main`) via Firebase Service Account.
-   - Provide helper functions for batch writing transaction documents to Firestore.
-3. **Data Cleaning & Normalization Engine (`backend/ingestion/processor.py`)**:
-   - **Bank Dataset Columns Supported**:
-     - `Date` & `Value Dt`: Parsed into standardized ISO date strings (`YYYY-MM-DD`).
-     - `Withdrawal Amt.` & `Deposit Amt.`:
-       - If `Withdrawal Amt.` > 0 $\rightarrow$ `activity_type = 'expense'`, `amount = Withdrawal Amt.`
-       - If `Deposit Amt.` > 0 $\rightarrow$ `activity_type = 'income'`, `amount = Deposit Amt.`
-     - `Closing Balance`: Captured as float.
-     - `Chq./Ref.No.`: Captured or filled with `"NA"`.
-   - **Narration Parsing Logic**:
-     - Narration string is split by hyphen (`-`).
-     - `part[0]`: `payment_method` (e.g. `UPI`, `DEBIT`, `CREDIT`).
-     - `part[1]`: `merchant_name` (e.g. `ANITA MADHUKAR SHIND`).
-     - `part[-1]`: `description` (e.g. `EGGS`).
-   - **Null Filling & Deduplication**:
-     - Empty text fields filled with `"NA"` / `"NAN"`.
-     - `drop_duplicates(subset=['transaction_date', 'amount', 'description', 'activity_type'])`.
-4. **FastAPI Endpoint (`main.py` / `backend/ingestion/router.py`)**:
-   - `POST /api/transactions/upload-csv`: Endpoint receiving `file: UploadFile` and `user_id: str`.
-   - Returns structured cleaning report (`total_rows_read`, `duplicates_removed`, `nulls_filled_count`, `inserted_count`).
+### Component Architecture & Placement
+
+1. **Header Alert Bell (`NotificationBell.jsx`)**:
+   * Placed in the top-right header area of [`DashboardOverview.jsx`](file:///d:/projects/HackRonyX_2.0_Ray/src/components/dashboard/DashboardOverview.jsx) or top header bar in [`DashboardNavbar.jsx`](file:///d:/projects/HackRonyX_2.0_Ray/src/components/dashboard/DashboardNavbar.jsx).
+   * Displays an animated notification badge (e.g. red pill with count `3`) when unread alerts exist.
+   * Clicking toggles the **Notification Center Drawer / Popover**.
+
+2. **Notification Drawer / Flyout (`NotificationCenter.jsx`)**:
+   * Floats smoothly over the screen with a clean glassmorphic backdrop.
+   * Displays alert items with:
+     * Color-coded severity badge:
+       * `critical`: Red pill with `<ShieldAlert size={14} />`
+       * `high`: Amber pill with `<AlertTriangle size={14} />`
+       * `mid`: Blue pill with `<Bell size={14} />`
+       * `low`: Slate pill with `<Info size={14} />`
+     * Relative timestamp (e.g., *"12 mins ago"*, *"Today 03:45 PM"*).
+     * Clear causal explanation.
+     * Quick-action **"Mark as Read"** icon button.
+     * **"Discuss with AI Guardian"** button that routes to chat with pre-filled prompt.
+   * Header actions: **"Mark All as Read"** and filter pills (`All`, `Unread`, `Critical`).
+
+3. **High-Severity Alert Banner on Dashboard (`CriticalAlertBanner.jsx`)**:
+   * If there is an active, unread `critical` alert (such as safety buffer breach), a slim banner renders at the very top of `DashboardOverview.jsx`.
+   * Includes a dismiss button `[✕]` so the user can acknowledge it without cluttering their view.
+
+4. **Zero Impact on Existing Views**:
+   * Isolated state via custom React hook: `useAlerts(activeUserId)`.
+   * All existing views (`AnalyticsView`, `TransactionsView`, `AIChatWidget`, `MatrixExplanation`, `SettingsView`) continue operating without modifications to their props or routing.
 
 ---
 
-## 3. Step-by-Step Implementation Steps
+## 5. Step-by-Step Implementation Roadmap
 
-### Step 1: Install Dependencies
-- Add `firebase-admin>=6.5.0` and `openpyxl>=3.1.0` to `pyproject.toml`.
+```
+┌─────────────────────────────────┐
+│ Phase 1: Backend Alert Engine   │ ──► • Write backend/alerts/engine.py
+│                                 │     • Implement condition evaluation logic
+└─────────────────────────────────┘     • Add 24h deduplication cooldown
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Phase 2: REST Endpoints & Hooks │ ──► • Add /api/alerts endpoints in main.py
+│                                 │     • Connect transaction hook trigger
+└─────────────────────────────────┘     • Unit test with real Neon DB data
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Phase 3: Frontend Notification  │ ──► • Build NotificationBell & NotificationCenter
+│          Center UI              │     • Integrate unread badge & mark-as-read
+└─────────────────────────────────┘     • Add dismissible critical banner
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Phase 4: Live Verification      │ ──► • Test balance < weekly_budget trigger
+│                                 │     • Test balance < monthly_budget trigger
+└─────────────────────────────────┘     • Verify Neon DB alerts table persistence
+```
 
-### Step 2: Create Firestore Connection Layer (`backend/db/firestore_client.py`)
-- Initialize `firebase_admin` SDK.
-- Create `get_firestore_db()` client accessor.
-- Implement `save_transactions_batch(user_id: str, transactions: list[dict])` using Firestore batch writes.
+### Phase 1: Backend Alert Engine (`backend/alerts/engine.py`)
+- [ ] Create `backend/alerts/engine.py` with evaluation rules for:
+  - Net balance < weekly budget
+  - Net balance < monthly budget
+  - Net balance < safety buffer
+  - Weekly spend > weekly budget limit
+  - Anomaly single expense detection
+  - Daily burn surge detection
+- [ ] Implement cooldown query to prevent duplicate alert insertion within 24 hours.
+- [ ] Connect database connection via `db.database.get_db_connection()`.
 
-### Step 3: Implement Data Preprocessing & Cleaning Engine (`backend/ingestion/processor.py`)
-- Implement `process_transaction_dataset(file_content: bytes, filename: str) -> dict`:
-  1. Detect format (`.csv` vs `.xlsx`) and load into Pandas DataFrame.
-  2. Map column headers dynamically to target schema (`transaction_date`, `amount`, `description`, `category`, `activity_type`, `payment_method`).
-  3. Perform string null filling with `"NA"` or `"NAN"`.
-  4. Perform deduplication: `df.drop_duplicates(subset=['transaction_date', 'amount', 'description'], keep='first')`.
-  5. Format timestamps and cast amounts to `float`.
-  6. Return cleaned dict list alongside execution summary metrics.
+### Phase 2: FastAPI Routing & Ingestion Hooks (`main.py`)
+- [ ] Add `GET /api/alerts` to query active user alerts from `alerts` table.
+- [ ] Add `PATCH /api/alerts/{alert_id}/read` and `POST /api/alerts/read-all`.
+- [ ] Add `POST /api/alerts/evaluate/{user_id}` for on-demand trigger.
+- [ ] Wire evaluator hook into `POST /api/transactions` and `POST /api/users/constants/{user_id}`.
 
-### Step 4: Create Upload API Endpoint (`main.py`)
-- Expose `POST /api/transactions/upload-csv` with `file: UploadFile` and `user_id: str = Form("usr-001")`.
-- Execute data cleaning engine, insert clean records into Firestore, and return JSON summary response.
+### Phase 3: Frontend Notification Center UI (`src/components/dashboard/`)
+- [ ] Create `src/components/dashboard/NotificationBell.jsx` with unread badge counter.
+- [ ] Create `src/components/dashboard/NotificationCenter.jsx` (flyout/modal with filters and severity styling).
+- [ ] Add optional `CriticalAlertBanner.jsx` at the top of `DashboardOverview.jsx`.
+- [ ] Mount bell icon into `DashboardOverview.jsx` top action bar next to "Add Transaction".
 
-### Step 5: Backend Ingestion Testing
-- Create test script `backend/ingestion/test_ingestion.py` using sample `.csv` and `.xlsx` files to verify:
-  - Successful parsing.
-  - Correct filling of null fields with `"NA"`/`"NAN"`.
-  - Proper removal of duplicate rows.
-  - Successful document creation in Firestore.
+### Phase 4: End-to-End Testing & Verification
+- [ ] Run test script inserting transactions that trigger weekly budget breach.
+- [ ] Verify rows appear in PostgreSQL `alerts` table.
+- [ ] Verify notifications render in UI, unread count increments, and "Mark as Read" updates Neon DB.
 
 ---
 
-## 4. Verification Plan
+## 6. Verification Criteria
 
-| Test Case | Description | Expected Outcome |
-| :--- | :--- | :--- |
-| **CSV Parsing & Cleaning** | Upload CSV with null descriptions and duplicate rows | Missing fields populated with `"NA"`, duplicates dropped, valid rows structured |
-| **XLSX Parsing** | Upload `.xlsx` statement file | Excel buffer parsed cleanly via `openpyxl` |
-| **Firestore Batch Write** | Execute upload endpoint for `user_id = "usr-001"` | Transaction documents created in Firestore collection `users/usr-001/transactions` or `transactions` |
-| **Summary Response** | Inspect HTTP response | Status `201 Created` with accurate stats (`total_rows`, `duplicates_removed`, `nulls_filled`) |
-
----
-
-## 5. Confirmed Design Choices
-
-1. **Firestore Authentication**:
-   - The Python backend will authenticate using a **Firebase Service Account JSON key file** (configured via `GOOGLE_APPLICATION_CREDENTIALS` environment variable or `serviceAccountKey.json`).
-2. **Firestore Collection Structure**:
-   - Transactions will be stored in a **root collection named `transactions`**, where each transaction document includes the field `user_id: "usr-001"`.
-
+1. **Database Verification**:
+   * Running `SELECT * FROM alerts;` against Neon PostgreSQL returns valid rows containing `user_id`, `alert_level`, `alert_type`, and descriptive `message`.
+2. **Deduplication Verification**:
+   * Multiple calls to `/api/alerts/evaluate/{user_id}` within 24 hours do not create duplicate rows for the same condition.
+3. **Frontend Non-Intrusiveness**:
+   * Dashboard Overview, 7–14 Day Forecast chart, Safe-to-Spend visualizer, Transactions feed, and AI Chat continue rendering identically.
+   * Clicking notification bell smoothly opens the drawer; marking alerts as read updates unread counter and Neon DB state in real-time.

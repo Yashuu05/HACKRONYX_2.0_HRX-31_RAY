@@ -2385,6 +2385,13 @@ def create_transaction(payload: TransactionCreateSchema):
         res_dict = dict(new_row)
         res_dict['amount'] = float(res_dict['amount'])
 
+        # Real-time reactive condition alert evaluation for this transaction
+        try:
+            from backend.alerts.engine import evaluate_and_record_alerts
+            evaluate_and_record_alerts(user_id=target_user_id, trigger_tx=res_dict)
+        except Exception as alert_err:
+            print(f"[Alert Trigger Hook Warning] {alert_err}")
+
         return {
             "status": "success",
             "message": "Transaction recorded successfully in PostgreSQL!",
@@ -2516,6 +2523,13 @@ def parse_and_create_natural_language_transaction(payload: NaturalLanguageTransa
 
         res_dict = dict(new_row)
         res_dict["amount"] = float(res_dict["amount"])
+
+        # Real-time reactive condition alert evaluation for natural language transaction
+        try:
+            from backend.alerts.engine import evaluate_and_record_alerts
+            evaluate_and_record_alerts(user_id=target_user_id, trigger_tx=res_dict)
+        except Exception as alert_err:
+            print(f"[Alert Trigger Hook Warning] {alert_err}")
 
         return {
             "status": "success",
@@ -2706,4 +2720,88 @@ async def upload_csv_transactions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process and ingest dataset: {str(e)}"
         )
+
+
+# ============================================================
+# CONDITION-BASED ALERTS ENDPOINTS (Neon PostgreSQL 'alerts' table)
+# ============================================================
+
+class MarkAllAlertsReadSchema(BaseModel):
+    user_id: str = "usr-001"
+
+
+@app.get("/api/alerts")
+def get_alerts_endpoint(user_id: str = "usr-001", unread_only: bool = False, limit: int = 50):
+    """
+    Retrieve stored condition-based alerts from Neon PostgreSQL 'alerts' table.
+    Performs real-time evaluation to ensure latest metrics are represented.
+    """
+    try:
+        from backend.alerts.engine import get_user_alerts, evaluate_and_record_alerts
+        evaluate_and_record_alerts(user_id=user_id)
+        return get_user_alerts(user_id=user_id, unread_only=unread_only, limit=limit)
+    except Exception as e:
+        print(f"[Alerts API Error] {e}")
+        raise HTTPException(status_code=500, detail=f"Database error fetching alerts: {str(e)}")
+
+
+@app.post("/api/alerts/evaluate/{user_id}")
+def evaluate_alerts_endpoint(user_id: str):
+    """
+    Manually triggers evaluation of all condition-based alert rules for a user.
+    """
+    try:
+        from backend.alerts.engine import evaluate_and_record_alerts, get_user_alerts
+        evaluate_and_record_alerts(user_id=user_id)
+        return get_user_alerts(user_id=user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error evaluating alerts: {str(e)}")
+
+
+@app.patch("/api/alerts/{alert_id}/read")
+def mark_alert_read_endpoint(alert_id: str):
+    """
+    Mark an individual alert as read in the Neon PostgreSQL 'alerts' table.
+    """
+    try:
+        from backend.alerts.engine import mark_alert_read
+        success = mark_alert_read(alert_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Alert not found.")
+        return {"status": "success", "message": "Alert marked as read.", "alert_id": alert_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error marking alert read: {str(e)}")
+
+
+@app.post("/api/alerts/read-all")
+def mark_all_alerts_read_endpoint(payload: MarkAllAlertsReadSchema):
+    """
+    Mark all unread alerts for a user as read.
+    """
+    try:
+        from backend.alerts.engine import mark_all_alerts_read
+        count = mark_all_alerts_read(payload.user_id)
+        return {"status": "success", "message": f"Marked {count} alert(s) as read.", "count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error marking all alerts read: {str(e)}")
+
+
+@app.delete("/api/alerts/{alert_id}")
+def delete_alert_endpoint(alert_id: str):
+    """
+    Delete a specific alert from the Neon PostgreSQL 'alerts' table.
+    """
+    try:
+        from backend.alerts.engine import delete_alert
+        success = delete_alert(alert_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Alert not found.")
+        return {"status": "success", "message": "Alert deleted.", "alert_id": alert_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error deleting alert: {str(e)}")
+
 

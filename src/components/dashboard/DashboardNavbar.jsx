@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   ShieldCheck, LayoutDashboard, PieChart, Receipt, Bot,
-  Settings, PlusCircle, LogOut, Calculator, ChevronLeft, ChevronRight
+  Settings, PlusCircle, LogOut, Calculator, ChevronLeft, ChevronRight, Bell
 } from 'lucide-react';
 
 export default function DashboardSidebar({ 
@@ -12,7 +12,9 @@ export default function DashboardSidebar({
   onLogout, 
   collapsed: propCollapsed, 
   onCollapseChange,
-  onToggleCollapse
+  onToggleCollapse,
+  unreadAlertsCount = 0,
+  onToggleNotificationCenter
 }) {
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const isControlled = typeof propCollapsed === 'boolean';
@@ -170,8 +172,50 @@ export default function DashboardSidebar({
         })}
       </nav>
 
-      {/* Bottom: Settings + User */}
+      {/* Bottom: Alerts + Settings + User */}
       <div style={{ borderTop: '1px solid #F1F5F9', padding: collapsed ? '12px 8px' : '12px 10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {/* Alerts / Notification Center */}
+        {onToggleNotificationCenter && (
+          <button
+            onClick={onToggleNotificationCenter}
+            title={collapsed ? (unreadAlertsCount > 0 ? `${unreadAlertsCount} Alerts` : 'Alerts') : undefined}
+            style={{
+              width: '100%',
+              padding: collapsed ? '11px' : '11px 14px',
+              borderRadius: '10px',
+              border: '1px solid transparent',
+              backgroundColor: unreadAlertsCount > 0 ? '#FEF2F2' : 'transparent',
+              color: unreadAlertsCount > 0 ? '#DC2626' : '#475569',
+              fontWeight: '600',
+              fontSize: '14px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: collapsed ? 'center' : 'space-between',
+              gap: '10px',
+              transition: 'all 0.15s',
+              fontFamily: 'inherit',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Bell size={18} color={unreadAlertsCount > 0 ? '#DC2626' : '#64748B'} />
+              {!collapsed && <span>Alerts</span>}
+            </div>
+            {!collapsed && unreadAlertsCount > 0 && (
+              <span style={{
+                padding: '2px 7px',
+                borderRadius: '8px',
+                backgroundColor: '#DC2626',
+                color: '#FFFFFF',
+                fontSize: '11px',
+                fontWeight: '800'
+              }}>
+                {unreadAlertsCount}
+              </span>
+            )}
+          </button>
+        )}
+
         {/* Settings */}
         <button
           onClick={() => setActiveTab('settings')}

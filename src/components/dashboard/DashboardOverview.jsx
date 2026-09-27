@@ -16,8 +16,20 @@ import {
   UploadCloud
 } from 'lucide-react';
 import ShortfallRiskCard from './ShortfallRiskCard';
+import NotificationBell from './NotificationBell';
+import CriticalAlertBanner from './CriticalAlertBanner';
 
-export default function DashboardOverview({ transactions, onOpenAddModal, onNavigateToChat, currentUser }) {
+export default function DashboardOverview({ 
+  transactions, 
+  onOpenAddModal, 
+  onNavigateToChat, 
+  currentUser,
+  alerts = [],
+  unreadAlertsCount = 0,
+  isNotificationCenterOpen = false,
+  onToggleNotificationCenter,
+  onMarkAlertRead
+}) {
   const activeUserId = currentUser?.user_id || currentUser?.id || currentUser?.uid || 'usr-001';
   const [horizonDays, setHorizonDays] = useState(14);
   const [hoveredPoint, setHoveredPoint] = useState(null);
@@ -236,7 +248,12 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
             Real-time liquidity forecasting & Safe-to-Spend intelligence from Neon DB.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <NotificationBell
+            unreadCount={unreadAlertsCount}
+            onClick={onToggleNotificationCenter}
+            isOpen={isNotificationCenterOpen}
+          />
           <button onClick={onOpenAddModal} className="btn btn-secondary" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <UploadCloud size={16} color="#0284C7" />
             <span>Upload CSV / XLSX</span>
@@ -247,6 +264,15 @@ export default function DashboardOverview({ transactions, onOpenAddModal, onNavi
           </button>
         </div>
       </div>
+
+      {/* Dismissible High-Severity Alert Banner (Triggered by real conditions in Neon DB) */}
+      {alerts && alerts.find(a => !a.is_read && (a.alert_level === 'critical' || a.alert_level === 'high')) && (
+        <CriticalAlertBanner
+          alert={alerts.find(a => !a.is_read && (a.alert_level === 'critical' || a.alert_level === 'high'))}
+          onAcknowledge={onMarkAlertRead}
+          onOpenNotificationCenter={onToggleNotificationCenter}
+        />
+      )}
 
       {/* 6-Stat Hero Metrics Grid */}
       <div style={{
